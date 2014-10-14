@@ -6,7 +6,7 @@ import (
 )
 
 func TestFakeClockAfter(t *testing.T) {
-	fc := &FakeClock{}
+	fc := &fakeClock{}
 
 	one := fc.After(1)
 	two := fc.After(2)

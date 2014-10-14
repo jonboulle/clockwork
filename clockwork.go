@@ -82,9 +82,7 @@ func (fc *fakeClock) After(d time.Duration) <-chan time.Time {
 	done := make(chan time.Time, 1)
 	if d.Nanoseconds() == 0 {
 		// special case - trigger immediately
-		go func() {
-			done <- now
-		}()
+		done <- now
 	} else {
 		// otherwise, add to the set of sleepers
 		s := &sleeper{
