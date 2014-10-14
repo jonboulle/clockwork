@@ -8,6 +8,12 @@ import (
 func TestFakeClockAfter(t *testing.T) {
 	fc := &fakeClock{}
 
+	zero := fc.After(0)
+	select {
+	case <-zero:
+	default:
+		t.Errorf("zero did not return!")
+	}
 	one := fc.After(1)
 	two := fc.After(2)
 	six := fc.After(6)
