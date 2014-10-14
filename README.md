@@ -29,7 +29,7 @@ Now you can easily test `my_func` with a `FakeClock`:
 
 ```
 func TestMyFunc(t *testing.T) {
-	c := &clockwork.NewFakeClock()
+	c := clockwork.NewFakeClock()
 
 	// Start our sleepy function
 	my_func(c)
