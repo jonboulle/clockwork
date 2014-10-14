@@ -33,7 +33,7 @@ func NewRealClock() Clock {
 
 // NewFakeClock returns a FakeClock implementation which can be
 // manually ticked through time for testing.
-func NewFakeClock() *FakeClock {
+func NewFakeClock() FakeClock {
 	return &fakeClock{
 		l: sync.RWMutex{},
 	}
