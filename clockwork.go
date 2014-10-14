@@ -17,12 +17,11 @@ type Clock interface {
 // manually ticked through time
 type FakeClock interface {
 	Clock
-	// Tick advances the FakeClock to a new point in time,
-	// ensuring any existing sleepers are notified
-	// appropriately before returning
+	// Tick advances the FakeClock to a new point in time, ensuring any existing
+	// sleepers are notified appropriately before returning
 	Tick(d time.Duration)
-	// BlockUntil will block until the FakeClock has the given
-	// number of sleepers (callers of Sleep or After)
+	// BlockUntil will block until the FakeClock has the given number of
+	// sleepers (callers of Sleep or After)
 	BlockUntil(n int)
 }
 
