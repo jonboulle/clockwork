@@ -13,16 +13,29 @@ type Clock interface {
 	Now() time.Time
 }
 
+// FakeClock provides an interface for a clock which can be
+// manually ticked through time
+type FakeClock interface {
+	Clock
+	// Tick advances the FakeClock to a new point in time,
+	// ensuring any existing sleepers are notified
+	// appropriately before returning
+	Tick(d time.Duration)
+	// BlockUntil will block until the FakeClock has the given
+	// number of sleepers (callers of Sleep or After)
+	BlockUntil(n int)
+}
+
 // NewRealClock returns a Clock which simply delegates calls to the actual time
 // package; it should be used by packages in production.
 func NewRealClock() Clock {
 	return &realClock{}
 }
 
-// NewFakeClock returns a FakeClock which can be manually ticked through time for
-// testing.
+// NewFakeClock returns a FakeClock implementation which can be
+// manually ticked through time for testing.
 func NewFakeClock() *FakeClock {
-	return &FakeClock{
+	return &fakeClock{
 		l: sync.RWMutex{},
 	}
 }
@@ -41,7 +54,7 @@ func (rc *realClock) Now() time.Time {
 	return time.Now()
 }
 
-type FakeClock struct {
+type fakeClock struct {
 	sleepers []*sleeper
 	blockers []*blocker
 	time     time.Time
@@ -62,8 +75,8 @@ type blocker struct {
 }
 
 // After mimics time.After; it waits for the given duration to elapse on the
-// FakeClock, then sends the current time on the returned channel.
-func (fc *FakeClock) After(d time.Duration) <-chan time.Time {
+// fakeClock, then sends the current time on the returned channel.
+func (fc *fakeClock) After(d time.Duration) <-chan time.Time {
 	fc.l.Lock()
 	defer fc.l.Unlock()
 	now := fc.time
@@ -87,7 +100,7 @@ func (fc *FakeClock) After(d time.Duration) <-chan time.Time {
 }
 
 // notifyBlockers notifies all the blockers waiting until the
-// given number of sleepers are waiting on the FakeClock. It
+// given number of sleepers are waiting on the fakeClock. It
 // returns an updated slice of blockers (i.e. those still waiting)
 func notifyBlockers(blockers []*blocker, count int) (newBlockers []*blocker) {
 	for _, b := range blockers {
@@ -100,21 +113,21 @@ func notifyBlockers(blockers []*blocker, count int) (newBlockers []*blocker) {
 	return
 }
 
-// Sleep blocks until the given duration has passed on the FakeClock
-func (fc *FakeClock) Sleep(d time.Duration) {
+// Sleep blocks until the given duration has passed on the fakeClock
+func (fc *fakeClock) Sleep(d time.Duration) {
 	<-fc.After(d)
 }
 
-// Time returns the current time of the FakeClock
-func (fc *FakeClock) Now() time.Time {
+// Time returns the current time of the fakeClock
+func (fc *fakeClock) Now() time.Time {
 	fc.l.Lock()
 	defer fc.l.Unlock()
 	return fc.time
 }
 
-// Tick advances FakeClock to a new point in time, ensuring channels from any
+// Tick advances fakeClock to a new point in time, ensuring channels from any
 // previous invocations of After are notified appropriately before returning
-func (fc *FakeClock) Tick(d time.Duration) {
+func (fc *fakeClock) Tick(d time.Duration) {
 	fc.l.Lock()
 	end := fc.time.Add(d)
 	var newSleepers []*sleeper
@@ -130,9 +143,9 @@ func (fc *FakeClock) Tick(d time.Duration) {
 	fc.l.Unlock()
 }
 
-// BlockUntil will block until the FakeClock has the given number of sleepers
+// BlockUntil will block until the fakeClock has the given number of sleepers
 // (callers of Sleep or After)
-func (fc *FakeClock) BlockUntil(n int) {
+func (fc *fakeClock) BlockUntil(n int) {
 	fc.l.Lock()
 	// Fast path: current number of sleepers is what we're looking for
 	if len(fc.sleepers) == n {
