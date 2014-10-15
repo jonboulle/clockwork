@@ -136,6 +136,7 @@ func (fc *fakeClock) Tick(d time.Duration) {
 		}
 	}
 	fc.sleepers = newSleepers
+	fc.blockers = notifyBlockers(fc.blockers, len(fc.sleepers))
 	fc.time = end
 	fc.l.Unlock()
 }
