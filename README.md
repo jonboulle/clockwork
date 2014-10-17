@@ -1,6 +1,9 @@
 clockwork
 =========
 
+[![Build Status](https://travis-ci.org/jonboulle/clockwork.png?branch=master)](https://travis-ci.org/jonboulle/clockwork)
+[![godoc](https://godoc.org/github.com/jonboulle/clockwork?status.svg)](http://godoc.org/github.com/jonboulle/clockwork) 
+
 a simple fake clock for golang
 
 # Usage
