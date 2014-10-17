@@ -126,6 +126,7 @@ func (fc *fakeClock) Now() time.Time {
 // previous invocations of After are notified appropriately before returning
 func (fc *fakeClock) Advance(d time.Duration) {
 	fc.l.Lock()
+	defer fc.l.Unlock()
 	end := fc.time.Add(d)
 	var newSleepers []*sleeper
 	for _, s := range fc.sleepers {
@@ -138,7 +139,6 @@ func (fc *fakeClock) Advance(d time.Duration) {
 	fc.sleepers = newSleepers
 	fc.blockers = notifyBlockers(fc.blockers, len(fc.sleepers))
 	fc.time = end
-	fc.l.Unlock()
 }
 
 // BlockUntil will block until the fakeClock has the given number of sleepers
