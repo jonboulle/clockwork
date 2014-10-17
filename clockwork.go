@@ -14,7 +14,7 @@ type Clock interface {
 }
 
 // FakeClock provides an interface for a clock which can be
-// manually advanceed through time
+// manually advanced through time
 type FakeClock interface {
 	Clock
 	// Advance advances the FakeClock to a new point in time, ensuring any existing
@@ -32,7 +32,7 @@ func NewRealClock() Clock {
 }
 
 // NewFakeClock returns a FakeClock implementation which can be
-// manually advanceed through time for testing.
+// manually advanced through time for testing.
 func NewFakeClock() FakeClock {
 	return &fakeClock{
 		l: sync.RWMutex{},
