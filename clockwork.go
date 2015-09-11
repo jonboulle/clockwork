@@ -36,7 +36,7 @@ func NewRealClock() Clock {
 // FakeClock will be an arbitrary non-zero time.
 func NewFakeClock() FakeClock {
 	// use a fixture that does not fulfill Time.IsZero()
-	return NewFakeClockAt(time.Date(1900, time.January, 1, 0, 0, 0, 0, time.UTC))
+	return NewFakeClockAt(time.Date(1984, time.April, 4, 0, 0, 0, 0, time.UTC))
 }
 
 // NewFakeClock returns a FakeClock initialised at the given time.Time.
