@@ -127,3 +127,13 @@ func TestNewFakeClockAt(t *testing.T) {
 		t.Fatalf("fakeClock.Now() returned unexpected non-initialised value: want=%#v, got %#v", t1, now)
 	}
 }
+
+func TestFakeClockSince(t *testing.T) {
+	fc := NewFakeClock()
+	now := fc.Now()
+	elapsedTime := time.Second
+	fc.Advance(elapsedTime)
+	if fc.Since(now) != elapsedTime {
+		t.Fatalf("fakeClock.Since() returned unexpected duration, got: %d, want: %d", fc.Since(now), elapsedTime)
+	}
+}
