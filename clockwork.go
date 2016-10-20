@@ -1,6 +1,9 @@
 package clockwork
 
 import (
+	"fmt"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,6 +27,10 @@ type FakeClock interface {
 	// BlockUntil will block until the FakeClock has the given number of
 	// sleepers (callers of Sleep or After)
 	BlockUntil(n int)
+
+	// SleeperStacks returns a slice of strings. Each string contains the stack for what
+	// created that sleeper. This is useful for figuring out where your sleepers are.
+	SleeperStacks() []string
 }
 
 // NewRealClock returns a Clock which simply delegates calls to the actual time
@@ -77,6 +84,7 @@ type fakeClock struct {
 type sleeper struct {
 	until time.Time
 	done  chan time.Time
+	stack string
 }
 
 // blocker represents a caller of BlockUntil
@@ -100,6 +108,7 @@ func (fc *fakeClock) After(d time.Duration) <-chan time.Time {
 		s := &sleeper{
 			until: now.Add(d),
 			done:  done,
+			stack: getStack(),
 		}
 		fc.sleepers = append(fc.sleepers, s)
 		// and notify any blockers
@@ -140,6 +149,14 @@ func (fc *fakeClock) Since(t time.Time) time.Duration {
 	return fc.Now().Sub(t)
 }
 
+func (fc *fakeClock) SleeperStacks() []string {
+	stacks := make([]string, len(fc.sleepers))
+	for i := range stacks {
+		stacks[i] = fc.sleepers[i].stack
+	}
+	return stacks
+}
+
 // Advance advances fakeClock to a new point in time, ensuring channels from any
 // previous invocations of After are notified appropriately before returning
 func (fc *fakeClock) Advance(d time.Duration) {
@@ -176,4 +193,16 @@ func (fc *fakeClock) BlockUntil(n int) {
 	fc.blockers = append(fc.blockers, b)
 	fc.l.Unlock()
 	<-b.ch
+}
+
+func getStack() string {
+	pcs := make([]uintptr, 256)
+	n := runtime.Callers(3, pcs)
+	stack := make([]string, n)
+	for i := range stack {
+		fn := runtime.FuncForPC(pcs[i])
+		file, line := fn.FileLine(pcs[i])
+		stack[i] = fmt.Sprintf("%s:%d", file, line)
+	}
+	return strings.Join(stack, "\n")
 }
