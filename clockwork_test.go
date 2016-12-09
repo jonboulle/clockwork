@@ -137,3 +137,75 @@ func TestFakeClockSince(t *testing.T) {
 		t.Fatalf("fakeClock.Since() returned unexpected duration, got: %d, want: %d", fc.Since(now), elapsedTime)
 	}
 }
+
+func TestFakeClockAfterTime(t *testing.T) {
+	fc := &fakeClock{}
+
+	add := func(d int) time.Time {
+		return fc.Now().Add(time.Duration(d))
+	}
+
+	zero := fc.AfterTime(add(0))
+	select {
+	case <-zero:
+	default:
+		t.Errorf("zero did not return!")
+	}
+	one := fc.AfterTime(add(1))
+	two := fc.AfterTime(add(2))
+	six := fc.AfterTime(add(6))
+	ten := fc.AfterTime(add(10))
+	fc.Advance(1)
+	select {
+	case <-one:
+	default:
+		t.Errorf("one did not return!")
+	}
+	select {
+	case <-two:
+		t.Errorf("two returned prematurely!")
+	case <-six:
+		t.Errorf("six returned prematurely!")
+	case <-ten:
+		t.Errorf("ten returned prematurely!")
+	default:
+	}
+	fc.Advance(1)
+	select {
+	case <-two:
+	default:
+		t.Errorf("two did not return!")
+	}
+	select {
+	case <-six:
+		t.Errorf("six returned prematurely!")
+	case <-ten:
+		t.Errorf("ten returned prematurely!")
+	default:
+	}
+	fc.Advance(1)
+	select {
+	case <-six:
+		t.Errorf("six returned prematurely!")
+	case <-ten:
+		t.Errorf("ten returned prematurely!")
+	default:
+	}
+	fc.Advance(3)
+	select {
+	case <-six:
+	default:
+		t.Errorf("six did not return!")
+	}
+	select {
+	case <-ten:
+		t.Errorf("ten returned prematurely!")
+	default:
+	}
+	fc.Advance(100)
+	select {
+	case <-ten:
+	default:
+		t.Errorf("ten did not return!")
+	}
+}
