@@ -140,11 +140,11 @@ func (s *sleeper) T() *time.Timer { return nil }
 
 func (s *sleeper) Reset(d time.Duration) bool {
 	active := s.Stop()
-	defer atomic.StoreUint32(&s.done, 0)
 	s.until = s.fc.Now().Add(d)
 	if !active {
-		s.fc.addTimer(d, s)
+		defer s.fc.addTimer(s)
 	}
+	defer atomic.StoreUint32(&s.done, 0)
 	return active
 }
 
@@ -169,7 +169,7 @@ func (fc *fakeClock) NewTimer(d time.Duration) Timer {
 		arg:      done,
 		ch:       done,
 	}
-	fc.addTimer(d, s)
+	fc.addTimer(s)
 	return s
 }
 
@@ -184,17 +184,18 @@ func (fc *fakeClock) AfterFunc(d time.Duration, f func()) Timer {
 		arg:      f,
 		// zero-valued ch, the same as it is in the `time` pkg
 	}
-	fc.addTimer(d, s)
+	fc.addTimer(s)
 	return s
 }
 
-func (fc *fakeClock) addTimer(d time.Duration, s *sleeper) {
+func (fc *fakeClock) addTimer(s *sleeper) {
 	fc.l.Lock()
 	defer fc.l.Unlock()
 
-	if d.Nanoseconds() == 0 {
+	now := fc.time
+	if now.Sub(s.until) >= 0 {
 		// special case - trigger immediately
-		s.awaken(fc.time)
+		s.awaken(now)
 	} else {
 		// otherwise, add to the set of sleepers
 		fc.sleepers = append(fc.sleepers, s)

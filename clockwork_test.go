@@ -197,5 +197,14 @@ func TestFakeClockTimers(t *testing.T) {
 	default:
 	}
 
-	// TODO: Better testing around possible races with resetting timers
+	one.Reset(0)
+
+	if one.Stop() {
+		t.Errorf("reset to zero timer could be stopped")
+	}
+	select {
+	case <-one.C():
+	default:
+		t.Errorf("reset to zero timer didn't emit time")
+	}
 }
