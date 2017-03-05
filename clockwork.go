@@ -16,8 +16,8 @@ type Clock interface {
 
 	NewTicker(d time.Duration) Ticker
 
-	AfterFunc(d time.Duration, f func()) Timer
 	NewTimer(d time.Duration) Timer
+	AfterFunc(d time.Duration, f func()) Timer
 }
 
 // Timer provides an interface to a time.Timer which is testable
@@ -84,12 +84,12 @@ func (rc *realClock) NewTicker(d time.Duration) Ticker {
 	return &realTicker{time.NewTicker(d)}
 }
 
-func (rc *realClock) AfterFunc(d time.Duration, f func()) Timer {
-	return &realTimer{time.AfterFunc(d, f)}
-}
-
 func (rc *realClock) NewTimer(d time.Duration) Timer {
 	return &realTimer{time.NewTimer(d)}
+}
+
+func (rc *realClock) AfterFunc(d time.Duration, f func()) Timer {
+	return &realTimer{time.AfterFunc(d, f)}
 }
 
 type realTimer struct {
