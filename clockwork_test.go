@@ -254,3 +254,25 @@ func TestBlockingOnTimers(t *testing.T) {
 		fc.BlockUntil(0)
 	})
 }
+
+func TestAdvancePastAfter(t *testing.T) {
+	fc := &fakeClock{}
+
+	start := fc.Now()
+	one := fc.After(1)
+	two := fc.After(2)
+	six := fc.After(6)
+
+	fc.Advance(1)
+	if start.Add(1).Sub(<-one) > 0 {
+		t.Errorf("timestamp is too early")
+	}
+
+	fc.Advance(5)
+	if start.Add(2).Sub(<-two) > 0 {
+		t.Errorf("timestamp is too early")
+	}
+	if start.Add(6).Sub(<-six) > 0 {
+		t.Errorf("timestamp is too early")
+	}
+}
