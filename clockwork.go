@@ -129,7 +129,7 @@ type blocker struct {
 }
 
 func (s *sleeper) awaken(now time.Time) {
-	if s.Stop() {
+	if atomic.CompareAndSwapUint32(&s.done, 0, 1) {
 		s.callback(s.arg, now)
 	}
 }
@@ -141,15 +141,19 @@ func (s *sleeper) T() *time.Timer { return nil }
 func (s *sleeper) Reset(d time.Duration) bool {
 	active := s.Stop()
 	s.until = s.fc.Now().Add(d)
-	if !active {
-		defer s.fc.addTimer(s)
-	}
+	defer s.fc.addTimer(s)
 	defer atomic.StoreUint32(&s.done, 0)
 	return active
 }
 
 func (s *sleeper) Stop() bool {
-	return atomic.CompareAndSwapUint32(&s.done, 0, 1)
+	stopped := atomic.CompareAndSwapUint32(&s.done, 0, 1)
+	if stopped {
+		// Expire the timer and notify blockers
+		s.until = s.fc.Now()
+		s.fc.Advance(0)
+	}
+	return stopped
 }
 
 // After mimics time.After; it waits for the given duration to elapse on the
