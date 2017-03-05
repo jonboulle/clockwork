@@ -137,3 +137,65 @@ func TestFakeClockSince(t *testing.T) {
 		t.Fatalf("fakeClock.Since() returned unexpected duration, got: %d, want: %d", fc.Since(now), elapsedTime)
 	}
 }
+
+func TestFakeClockTimers(t *testing.T) {
+	fc := &fakeClock{}
+
+	zero := fc.NewTimer(0)
+
+	if zero.Stop() {
+		t.Errorf("zero timer could be stopped")
+	}
+	select {
+	case <-zero.C():
+	default:
+		t.Errorf("zero timer didn't emit time")
+	}
+
+	one := fc.NewTimer(1)
+
+	select {
+	case <-one.C():
+		t.Errorf("non-zero timer did emit time")
+	default:
+	}
+	if !one.Stop() {
+		t.Errorf("non-zero timer couldn't be stopped")
+	}
+
+	fc.Advance(5)
+
+	select {
+	case <-one.C():
+		t.Errorf("stopped timer did emit time")
+	default:
+	}
+
+	if one.Reset(1) {
+		t.Errorf("resetting stopped timer didn't return false")
+	}
+	if !one.Reset(1) {
+		t.Errorf("resetting active timer didn't return true")
+	}
+
+	fc.Advance(1)
+
+	if one.Stop() {
+		t.Errorf("triggered timer could be stopped")
+	}
+	select {
+	case <-one.C():
+	default:
+		t.Errorf("triggered timer didn't emit time")
+	}
+
+	fc.Advance(1)
+
+	select {
+	case <-one.C():
+		t.Errorf("triggered timer emitted time more than once")
+	default:
+	}
+
+	// TODO: Better testing around possible races with resetting timers
+}
