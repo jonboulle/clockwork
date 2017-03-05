@@ -18,7 +18,8 @@ type Clock interface {
 	AfterFunc(d time.Duration, f func()) Timer
 }
 
-// Timer provides an interface to a time.Timer which is testable
+// Timer provides an interface to a time.Timer which is testable.
+// See https://golang.org/pkg/time/#Timer for more details on how timers work.
 type Timer interface {
 	C() <-chan time.Time
 	Reset(d time.Duration) bool
@@ -116,9 +117,9 @@ type sleeper struct {
 	callback func(interface{}, time.Time)
 	arg      interface{}
 
-	ch    chan time.Time
-	done  uint32
-	clock Clock // needed for Reset()
+	ch   chan time.Time
+	done uint32
+	fc   *fakeClock // needed for Reset()
 }
 
 // blocker represents a caller of BlockUntil
@@ -138,12 +139,13 @@ func (s *sleeper) C() <-chan time.Time { return s.ch }
 func (s *sleeper) T() *time.Timer { return nil }
 
 func (s *sleeper) Reset(d time.Duration) bool {
-	if !s.Stop() {
-		return false
-	}
+	active := s.Stop()
 	defer atomic.StoreUint32(&s.done, 0)
-	s.until = s.clock.Now().Add(d)
-	return true
+	s.until = s.fc.Now().Add(d)
+	if !active {
+		s.fc.addTimer(d, s)
+	}
+	return active
 }
 
 func (s *sleeper) Stop() bool {
@@ -159,12 +161,9 @@ func (fc *fakeClock) After(d time.Duration) <-chan time.Time {
 // NewTimer creates a new Timer that will send the current time on its channel
 // after the given duration elapses on the fake clock.
 func (fc *fakeClock) NewTimer(d time.Duration) Timer {
-	fc.l.Lock()
-	defer fc.l.Unlock()
-
 	done := make(chan time.Time, 1)
 	s := &sleeper{
-		clock:    fc,
+		fc:       fc,
 		until:    fc.time.Add(d),
 		callback: sendTime,
 		arg:      done,
@@ -178,11 +177,8 @@ func (fc *fakeClock) NewTimer(d time.Duration) Timer {
 // in its own goroutine.
 // It returns a Timer that can be used to cancel the call using its Stop method.
 func (fc *fakeClock) AfterFunc(d time.Duration, f func()) Timer {
-	fc.l.Lock()
-	defer fc.l.Unlock()
-
 	s := &sleeper{
-		clock:    fc,
+		fc:       fc,
 		until:    fc.time.Add(d),
 		callback: goFunc,
 		arg:      f,
@@ -193,6 +189,9 @@ func (fc *fakeClock) AfterFunc(d time.Duration, f func()) Timer {
 }
 
 func (fc *fakeClock) addTimer(d time.Duration, s *sleeper) {
+	fc.l.Lock()
+	defer fc.l.Unlock()
+
 	if d.Nanoseconds() == 0 {
 		// special case - trigger immediately
 		s.awaken(fc.time)
