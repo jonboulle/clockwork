@@ -258,7 +258,7 @@ func (fc *fakeClock) Advance(d time.Duration) {
 	var newSleepers []*sleeper
 	for _, s := range fc.sleepers {
 		if end.Sub(s.until) >= 0 {
-			s.awaken(fc.time)
+			s.awaken(end)
 		} else {
 			newSleepers = append(newSleepers, s)
 		}
