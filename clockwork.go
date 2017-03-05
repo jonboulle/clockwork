@@ -14,8 +14,8 @@ type Clock interface {
 	Now() time.Time
 	Since(t time.Time) time.Duration
 
-	AfterFunc(d time.Duration, f func()) Timer
 	NewTimer(d time.Duration) Timer
+	AfterFunc(d time.Duration, f func()) Timer
 }
 
 // Timer provides an interface to a time.Timer which is testable
@@ -78,12 +78,12 @@ func (rc *realClock) Since(t time.Time) time.Duration {
 	return rc.Now().Sub(t)
 }
 
-func (rc *realClock) AfterFunc(d time.Duration, f func()) Timer {
-	return &realTimer{time.AfterFunc(d, f)}
-}
-
 func (rc *realClock) NewTimer(d time.Duration) Timer {
 	return &realTimer{time.NewTimer(d)}
+}
+
+func (rc *realClock) AfterFunc(d time.Duration, f func()) Timer {
+	return &realTimer{time.AfterFunc(d, f)}
 }
 
 type realTimer struct {
