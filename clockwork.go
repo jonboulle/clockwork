@@ -113,7 +113,7 @@ type fakeClock struct {
 // sleeper represents a waiting timer from NewTimer, Sleep, After, etc.
 type sleeper struct {
 	until    time.Time
-	callback func(interface{})
+	callback func(interface{}, time.Time)
 	arg      interface{}
 
 	ch    chan time.Time
@@ -127,9 +127,9 @@ type blocker struct {
 	ch    chan struct{}
 }
 
-func (s *sleeper) awaken() {
+func (s *sleeper) awaken(now time.Time) {
 	if s.Stop() {
-		s.callback(s.arg)
+		s.callback(s.arg, now)
 	}
 }
 
@@ -166,7 +166,7 @@ func (fc *fakeClock) NewTimer(d time.Duration) Timer {
 	s := &sleeper{
 		clock:    fc,
 		until:    fc.time.Add(d),
-		callback: fc.sendTime,
+		callback: sendTime,
 		arg:      done,
 		ch:       done,
 	}
@@ -195,7 +195,7 @@ func (fc *fakeClock) AfterFunc(d time.Duration, f func()) Timer {
 func (fc *fakeClock) addTimer(d time.Duration, s *sleeper) {
 	if d.Nanoseconds() == 0 {
 		// special case - trigger immediately
-		s.awaken()
+		s.awaken(fc.time)
 	} else {
 		// otherwise, add to the set of sleepers
 		fc.sleepers = append(fc.sleepers, s)
@@ -204,12 +204,12 @@ func (fc *fakeClock) addTimer(d time.Duration, s *sleeper) {
 	}
 }
 
-func (fc *fakeClock) sendTime(c interface{}) {
-	c.(chan time.Time) <- fc.Now()
+func sendTime(c interface{}, now time.Time) {
+	c.(chan time.Time) <- now
 }
 
-func goFunc(arg interface{}) {
-	go arg.(func())()
+func goFunc(fn interface{}, _ time.Time) {
+	go fn.(func())()
 }
 
 // notifyBlockers notifies all the blockers waiting until the
@@ -254,7 +254,7 @@ func (fc *fakeClock) Advance(d time.Duration) {
 	var newSleepers []*sleeper
 	for _, s := range fc.sleepers {
 		if end.Sub(s.until) >= 0 {
-			s.awaken()
+			s.awaken(fc.time)
 		} else {
 			newSleepers = append(newSleepers, s)
 		}
