@@ -67,7 +67,7 @@ func (rc *realClock) Since(t time.Time) time.Duration {
 }
 
 func (rc *realClock) NewTicker(d time.Duration) Ticker {
-	return &realTicker{*time.NewTicker(d)}
+	return &realTicker{time.NewTicker(d)}
 }
 
 type fakeClock struct {

@@ -36,7 +36,7 @@ func TestFakeTickerTick(t *testing.T) {
 	select {
 	case tick := <-ft.Chan():
 		if tick != first {
-			t.Errorf("wrong tick time, got: %d, want: %d", tick, first)
+			t.Errorf("wrong tick time, got: %v, want: %v", tick, first)
 		}
 	default:
 		t.Errorf("expected tick!")
@@ -49,7 +49,7 @@ func TestFakeTickerTick(t *testing.T) {
 	select {
 	case tick := <-ft.Chan():
 		if tick != second {
-			t.Errorf("wrong tick time, got: %d, want: %d", tick, second)
+			t.Errorf("wrong tick time, got: %v, want: %v", tick, second)
 		}
 	default:
 		t.Errorf("expected tick!")

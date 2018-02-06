@@ -13,7 +13,7 @@ type Ticker interface {
 	Stop()
 }
 
-type realTicker struct{ time.Ticker }
+type realTicker struct{ *time.Ticker }
 
 func (rt *realTicker) Chan() <-chan time.Time {
 	return rt.C
