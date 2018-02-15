@@ -26,6 +26,9 @@ type FakeClock interface {
 	BlockUntil(n int)
 }
 
+// RealClock is a singleton instance of the real clock.
+var RealClock = NewRealClock()
+
 // NewRealClock returns a Clock which simply delegates calls to the actual time
 // package; it should be used by packages in production.
 func NewRealClock() Clock {
