@@ -12,7 +12,7 @@ Replace uses of the `time` package with the `clockwork.Clock` interface instead.
 
 For example, instead of using `time.Sleep` directly:
 
-```
+```go
 func my_func() {
 	time.Sleep(3 * time.Second)
 	do_something()
@@ -21,7 +21,7 @@ func my_func() {
 
 inject a clock and use its `Sleep` method instead:
 
-```
+```go
 func my_func(clock clockwork.Clock) {
 	clock.Sleep(3 * time.Second)
 	do_something()
@@ -30,7 +30,7 @@ func my_func(clock clockwork.Clock) {
 
 Now you can easily test `my_func` with a `FakeClock`:
 
-```
+```go
 func TestMyFunc(t *testing.T) {
 	c := clockwork.NewFakeClock()
 
@@ -58,7 +58,8 @@ func TestMyFunc(t *testing.T) {
 ```
 
 and in production builds, simply inject the real clock instead:
-```
+
+```go
 my_func(clockwork.NewRealClock())
 ```
 
