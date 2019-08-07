@@ -20,16 +20,6 @@ type Clock interface {
 	AfterFunc(d time.Duration, f func()) Timer
 }
 
-// Timer provides an interface to a time.Timer which is testable.
-// See https://golang.org/pkg/time/#Timer for more details on how timers work.
-type Timer interface {
-	C() <-chan time.Time
-	Reset(d time.Duration) bool
-	Stop() bool
-
-	T() *time.Timer // underlying *time.Timer (nil when using a FakeClock)
-}
-
 // FakeClock provides an interface for a clock which can be
 // manually advanced through time
 type FakeClock interface {
@@ -93,22 +83,6 @@ func (rc *realClock) AfterFunc(d time.Duration, f func()) Timer {
 	return &realTimer{time.AfterFunc(d, f)}
 }
 
-type realTimer struct {
-	t *time.Timer
-}
-
-func (rt *realTimer) C() <-chan time.Time { return rt.t.C }
-
-func (rt *realTimer) T() *time.Timer { return rt.t }
-
-func (rt *realTimer) Reset(d time.Duration) bool {
-	return rt.t.Reset(d)
-}
-
-func (rt *realTimer) Stop() bool {
-	return rt.t.Stop()
-}
-
 type fakeClock struct {
 	sleepers []*sleeper
 	blockers []*blocker
@@ -123,9 +97,9 @@ type sleeper struct {
 	callback func(interface{}, time.Time)
 	arg      interface{}
 
-	ch   chan time.Time
-	done uint32
-	fc   *fakeClock // needed for Reset()
+	c     chan time.Time
+	done  uint32
+	clock *fakeClock // needed for Reset()
 }
 
 // blocker represents a caller of BlockUntil
@@ -140,14 +114,12 @@ func (s *sleeper) awaken(now time.Time) {
 	}
 }
 
-func (s *sleeper) C() <-chan time.Time { return s.ch }
-
-func (s *sleeper) T() *time.Timer { return nil }
+func (s *sleeper) Chan() <-chan time.Time { return s.c }
 
 func (s *sleeper) Reset(d time.Duration) bool {
 	active := s.Stop()
-	s.until = s.fc.Now().Add(d)
-	defer s.fc.addTimer(s)
+	s.until = s.clock.Now().Add(d)
+	defer s.clock.addTimer(s)
 	defer atomic.StoreUint32(&s.done, 0)
 	return active
 }
@@ -156,46 +128,10 @@ func (s *sleeper) Stop() bool {
 	stopped := atomic.CompareAndSwapUint32(&s.done, 0, 1)
 	if stopped {
 		// Expire the timer and notify blockers
-		s.until = s.fc.Now()
-		s.fc.Advance(0)
+		s.until = s.clock.Now()
+		s.clock.Advance(0)
 	}
 	return stopped
-}
-
-// After mimics time.After; it waits for the given duration to elapse on the
-// fakeClock, then sends the current time on the returned channel.
-func (fc *fakeClock) After(d time.Duration) <-chan time.Time {
-	return fc.NewTimer(d).C()
-}
-
-// NewTimer creates a new Timer that will send the current time on its channel
-// after the given duration elapses on the fake clock.
-func (fc *fakeClock) NewTimer(d time.Duration) Timer {
-	done := make(chan time.Time, 1)
-	s := &sleeper{
-		fc:       fc,
-		until:    fc.time.Add(d),
-		callback: sendTime,
-		arg:      done,
-		ch:       done,
-	}
-	fc.addTimer(s)
-	return s
-}
-
-// AfterFunc waits for the duration to elapse on the fake clock and then calls f
-// in its own goroutine.
-// It returns a Timer that can be used to cancel the call using its Stop method.
-func (fc *fakeClock) AfterFunc(d time.Duration, f func()) Timer {
-	s := &sleeper{
-		fc:       fc,
-		until:    fc.time.Add(d),
-		callback: goFunc,
-		arg:      f,
-		// zero-valued ch, the same as it is in the `time` pkg
-	}
-	fc.addTimer(s)
-	return s
 }
 
 func (fc *fakeClock) addTimer(s *sleeper) {
@@ -214,12 +150,10 @@ func (fc *fakeClock) addTimer(s *sleeper) {
 	}
 }
 
-func sendTime(c interface{}, now time.Time) {
-	c.(chan time.Time) <- now
-}
-
-func goFunc(fn interface{}, _ time.Time) {
-	go fn.(func())()
+// After mimics time.After; it waits for the given duration to elapse on the
+// fakeClock, then sends the current time on the returned channel.
+func (fc *fakeClock) After(d time.Duration) <-chan time.Time {
+	return fc.NewTimer(d).Chan()
 }
 
 // notifyBlockers notifies all the blockers waiting until the
@@ -263,6 +197,44 @@ func (fc *fakeClock) NewTicker(d time.Duration) Ticker {
 	}
 	go ft.tick()
 	return ft
+}
+
+// NewTimer creates a new Timer that will send the current time on its channel
+// after the given duration elapses on the fake clock.
+func (fc *fakeClock) NewTimer(d time.Duration) Timer {
+	done := make(chan time.Time, 1)
+	sendTime := func(c interface{}, now time.Time) {
+		c.(chan time.Time) <- now
+	}
+
+	s := &sleeper{
+		clock:    fc,
+		until:    fc.time.Add(d),
+		callback: sendTime,
+		arg:      done,
+		c:        done,
+	}
+	fc.addTimer(s)
+	return s
+}
+
+// AfterFunc waits for the duration to elapse on the fake clock and then calls f
+// in its own goroutine.
+// It returns a Timer that can be used to cancel the call using its Stop method.
+func (fc *fakeClock) AfterFunc(d time.Duration, f func()) Timer {
+	goFunc := func(fn interface{}, _ time.Time) {
+		go fn.(func())()
+	}
+
+	s := &sleeper{
+		clock:    fc,
+		until:    fc.time.Add(d),
+		callback: goFunc,
+		arg:      f,
+		// zero-valued c, the same as it is in the `time` pkg
+	}
+	fc.addTimer(s)
+	return s
 }
 
 // Advance advances fakeClock to a new point in time, ensuring channels from any
