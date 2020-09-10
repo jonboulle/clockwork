@@ -9,6 +9,13 @@ import (
 func TestFakeClockAfter(t *testing.T) {
 	fc := &fakeClock{}
 
+	neg := fc.After(-1)
+	select {
+	case <-neg:
+	default:
+		t.Errorf("negative did not return!")
+	}
+
 	zero := fc.After(0)
 	select {
 	case <-zero:
