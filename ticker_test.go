@@ -39,7 +39,7 @@ func TestFakeTickerTick(t *testing.T) {
 		if tick != first {
 			t.Errorf("wrong tick time, got: %v, want: %v", tick, first)
 		}
-	default:
+	case <-time.After(time.Millisecond):
 		t.Errorf("expected tick!")
 	}
 
@@ -52,7 +52,7 @@ func TestFakeTickerTick(t *testing.T) {
 		if tick != second {
 			t.Errorf("wrong tick time, got: %v, want: %v", tick, second)
 		}
-	default:
+	case <-time.After(time.Millisecond):
 		t.Errorf("expected tick!")
 	}
 	ft.Stop()
