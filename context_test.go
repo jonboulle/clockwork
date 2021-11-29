@@ -8,13 +8,13 @@ import (
 
 func TestContextOps(t *testing.T) {
 	ctx := context.Background()
-	assertIsType(t, NewRealClock(), From(ctx))
+	assertIsType(t, NewRealClock(), FromContext(ctx))
 
-	ctx = AddTo(ctx, NewFakeClock())
-	assertIsType(t, NewFakeClock(), From(ctx))
+	ctx = AddToContext(ctx, NewFakeClock())
+	assertIsType(t, NewFakeClock(), FromContext(ctx))
 
-	ctx = AddTo(ctx, NewRealClock())
-	assertIsType(t, NewRealClock(), From(ctx))
+	ctx = AddToContext(ctx, NewRealClock())
+	assertIsType(t, NewRealClock(), FromContext(ctx))
 }
 
 func assertIsType(t *testing.T, expectedType interface{}, object interface{}) {

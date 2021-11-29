@@ -1,7 +1,6 @@
 package clockwork
 
 import (
-	"context"
 	"sync"
 	"time"
 )
@@ -26,8 +25,6 @@ type FakeClock interface {
 	// BlockUntil will block until the FakeClock has the given number of
 	// sleepers (callers of Sleep or After)
 	BlockUntil(n int)
-	// AddTo creates a derived context that references the clock.
-	AddTo(ctx context.Context) context.Context
 }
 
 // NewRealClock returns a Clock which simply delegates calls to the actual time
@@ -195,9 +192,4 @@ func (fc *fakeClock) BlockUntil(n int) {
 	fc.blockers = append(fc.blockers, b)
 	fc.l.Unlock()
 	<-b.ch
-}
-
-// AddTo creates a derived context that references the clock.
-func (fc *fakeClock) AddTo(ctx context.Context) context.Context {
-	return AddTo(ctx, fc)
 }
