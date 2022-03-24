@@ -89,8 +89,13 @@ func TestNotifyBlockers(t *testing.T) {
 	b5 := &blocker{10, make(chan struct{})}
 	bs := []*blocker{b1, b2, b3, b4, b5}
 	bs1 := notifyBlockers(bs, 2)
-	if n := len(bs1); n != 4 {
-		t.Fatalf("got %d blockers, want %d", n, 4)
+	if n := len(bs1); n != 3 {
+		t.Fatalf("got %d blockers, want %d", n, 3)
+	}
+	select {
+	case <-b1.ch:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for channel close!")
 	}
 	select {
 	case <-b2.ch:
@@ -98,8 +103,13 @@ func TestNotifyBlockers(t *testing.T) {
 		t.Fatalf("timed out waiting for channel close!")
 	}
 	bs2 := notifyBlockers(bs1, 10)
-	if n := len(bs2); n != 2 {
-		t.Fatalf("got %d blockers, want %d", n, 2)
+	if n := len(bs2); n != 0 {
+		t.Fatalf("got %d blockers, want %d", n, 0)
+	}
+	select {
+	case <-b3.ch:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for channel close!")
 	}
 	select {
 	case <-b4.ch:
@@ -143,4 +153,18 @@ func TestFakeClockSince(t *testing.T) {
 	if fc.Since(now) != elapsedTime {
 		t.Fatalf("fakeClock.Since() returned unexpected duration, got: %d, want: %d", fc.Since(now), elapsedTime)
 	}
+}
+
+// This used to result in a deadlock.
+// https://github.com/jonboulle/clockwork/issues/35
+func TestTwoBlockersOneBlock(t *testing.T) {
+	fc := &fakeClock{}
+
+	ft1 := fc.NewTicker(time.Second)
+	ft2 := fc.NewTicker(time.Second)
+
+	fc.BlockUntil(1)
+	fc.BlockUntil(2)
+	ft1.Stop()
+	ft2.Stop()
 }
