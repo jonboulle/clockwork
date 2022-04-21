@@ -13,6 +13,7 @@ type Clock interface {
 	Now() time.Time
 	Since(t time.Time) time.Duration
 	NewTicker(d time.Duration) Ticker
+	NewTimer(d time.Duration) Timer
 }
 
 // FakeClock provides an interface for a clock which can be
@@ -68,6 +69,10 @@ func (rc *realClock) Since(t time.Time) time.Duration {
 
 func (rc *realClock) NewTicker(d time.Duration) Ticker {
 	return &realTicker{time.NewTicker(d)}
+}
+
+func (rc *realClock) NewTimer(d time.Duration) Timer {
+	return &realTimer{time.NewTimer(d)}
 }
 
 type fakeClock struct {
@@ -132,7 +137,7 @@ func (fc *fakeClock) Sleep(d time.Duration) {
 	<-fc.After(d)
 }
 
-// Time returns the current time of the fakeClock
+// Now returns the current time of the fakeClock
 func (fc *fakeClock) Now() time.Time {
 	fc.l.RLock()
 	t := fc.time
@@ -145,6 +150,8 @@ func (fc *fakeClock) Since(t time.Time) time.Duration {
 	return fc.Now().Sub(t)
 }
 
+// NewTicker returns a ticker that will expire only after calls to fakeClock
+// Advance have moved the clock passed the given duration
 func (fc *fakeClock) NewTicker(d time.Duration) Ticker {
 	ft := &fakeTicker{
 		c:      make(chan time.Time, 1),
@@ -153,6 +160,25 @@ func (fc *fakeClock) NewTicker(d time.Duration) Ticker {
 		period: d,
 	}
 	ft.runTickThread()
+	return ft
+}
+
+// NewTimer returns a timer that will fire only after calls to fakeClock
+// Advance have moved the clock passed the given duration
+func (fc *fakeClock) NewTimer(d time.Duration) Timer {
+	stopped := uint32(0)
+	if d <= 0 {
+		stopped = 1
+	}
+	ft := &fakeTimer{
+		c:       make(chan time.Time, 1),
+		stop:    make(chan struct{}, 1),
+		reset:   make(chan reset, 1),
+		clock:   fc,
+		stopped: stopped,
+	}
+
+	ft.run(d)
 	return ft
 }
 
