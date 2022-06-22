@@ -175,3 +175,36 @@ func TestFakeClockTimer_ZeroResetDoesNotBlock(t *testing.T) {
 	}
 	<-timer.Chan()
 }
+
+func TestFakeClockTimer_Generation(t *testing.T) {
+	t.Parallel()
+	fc := NewFakeClock()
+	timer, ok := fc.NewTimer(5 * time.Second).(*fakeTimer)
+	if !ok {
+		t.Fatalf("NewTimer did not return instance of fakeTimer")
+	}
+	if timer.generation != 1 {
+		t.Errorf("Want initial generation 1, got %d", timer.generation)
+	}
+	timer.Stop()
+	if timer.generation != 2 {
+		t.Errorf("Want stopped generation 2, got %d", timer.generation)
+	}
+	timer.Stop()
+	if timer.generation != 2 {
+		t.Errorf("Want stopped generation still 2, got %d", timer.generation)
+	}
+	timer.Reset(3 * time.Second)
+	if timer.generation != 3 {
+		t.Errorf("Want reset generation 3, got %d", timer.generation)
+	}
+	timer.Reset(2 * time.Second)
+	if timer.generation != 5 {
+		t.Errorf("Want re-reset generation 5, got %d", timer.generation)
+	}
+	fc.Advance(5 * time.Second)
+	<-timer.Chan()
+	if timer.generation != 6 {
+		t.Errorf("Want expired generation 6, got %d", timer.generation)
+	}
+}

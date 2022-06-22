@@ -24,11 +24,12 @@ func (r realTimer) Chan() <-chan time.Time {
 }
 
 type fakeTimer struct {
-	c       chan time.Time
-	clock   FakeClock
-	stop    chan struct{}
-	reset   chan reset
-	stopped uint32
+	c     chan time.Time
+	clock *fakeClock
+
+	// Timer is running if the LSB is 1. Also, generation number will change on
+	// every reset, to help distinguish latest event from past registered events.
+	generation uint32
 }
 
 func (f *fakeTimer) Chan() <-chan time.Time {
@@ -36,62 +37,55 @@ func (f *fakeTimer) Chan() <-chan time.Time {
 }
 
 func (f *fakeTimer) Reset(d time.Duration) bool {
-	stopped := f.Stop()
-
-	f.reset <- reset{t: f.clock.Now().Add(d), next: f.clock.After(d)}
-	if d > 0 {
-		atomic.StoreUint32(&f.stopped, 0)
+	if d <= 0 {
+		stopped := f.Stop()
+		f.send(f.clock.Now())
+		return stopped
 	}
-
-	return stopped
+	var pastGen, generation uint32
+	for {
+		pastGen = atomic.LoadUint32(&f.generation)
+		// generation is the next odd number after pastGen
+		generation = pastGen + 1 + (pastGen & 1)
+		if atomic.CompareAndSwapUint32(&f.generation, pastGen, generation) {
+			break
+		}
+	}
+	// It would be better if we could use AfterFunc here, so that we don't leak
+	// goroutines for events that never get consumed.
+	after := f.clock.After(d)
+	go func() {
+		now := <-after
+		if atomic.CompareAndSwapUint32(&f.generation, generation, generation+1) {
+			// This is still the active timer, so send the time. There is a potential
+			// race here, where another thread could reset the timer and get it to
+			// expire before we manage to send here. Avoiding that would likely
+			// require the use of a mutex in many places.
+			f.send(now)
+		}
+	}()
+	return pastGen&1 != 0
 }
 
 func (f *fakeTimer) Stop() bool {
-	if atomic.CompareAndSwapUint32(&f.stopped, 0, 1) {
-		f.stop <- struct{}{}
-		return true
+	generation := atomic.LoadUint32(&f.generation)
+	for generation&1 != 0 { // While currently running.
+		if atomic.CompareAndSwapUint32(&f.generation, generation, generation+1) {
+			// We changed from running to stopped state.
+			return true
+		}
+		// Something else changed the value, check again.
+		generation = atomic.LoadUint32(&f.generation)
 	}
+	// We merely observed the value in stopped state.
 	return false
 }
 
-type reset struct {
-	t    time.Time
-	next <-chan time.Time
-}
-
-// run initializes a background goroutine to send the timer event to the timer channel
-// after the period. Events are discarded if the underlying ticker channel does not have
-// enough capacity.
-func (f *fakeTimer) run(initialDuration time.Duration) {
-	nextTick := f.clock.Now().Add(initialDuration)
-	next := f.clock.After(initialDuration)
-
-	waitForReset := func() (time.Time, <-chan time.Time) {
-		for {
-			select {
-			case <-f.stop:
-				continue
-			case r := <-f.reset:
-				return r.t, r.next
-			}
-		}
+// Events are discarded if the underlying ticker channel does not have enough
+// capacity.
+func (f *fakeTimer) send(t time.Time) {
+	select {
+	case f.c <- t:
+	default:
 	}
-
-	go func() {
-		for {
-			select {
-			case <-f.stop:
-			case <-next:
-				atomic.StoreUint32(&f.stopped, 1)
-				select {
-				case f.c <- nextTick:
-				default:
-				}
-
-				next = nil
-			}
-
-			nextTick, next = waitForReset()
-		}
-	}()
 }

@@ -166,19 +166,11 @@ func (fc *fakeClock) NewTicker(d time.Duration) Ticker {
 // NewTimer returns a timer that will fire only after calls to fakeClock
 // Advance have moved the clock passed the given duration
 func (fc *fakeClock) NewTimer(d time.Duration) Timer {
-	stopped := uint32(0)
-	if d <= 0 {
-		stopped = 1
-	}
 	ft := &fakeTimer{
-		c:       make(chan time.Time, 1),
-		stop:    make(chan struct{}, 1),
-		reset:   make(chan reset, 1),
-		clock:   fc,
-		stopped: stopped,
+		c:     make(chan time.Time, 1),
+		clock: fc,
 	}
-
-	ft.run(d)
+	ft.Reset(d)
 	return ft
 }
 
