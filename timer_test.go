@@ -133,3 +133,45 @@ func TestFakeClockTimer_Race2(t *testing.T) {
 	}
 	timer.Stop()
 }
+
+func TestFakeClockTimer_ResetRace(t *testing.T) {
+	t.Parallel()
+	fc := NewFakeClock()
+	d := 5 * time.Second
+	var times []time.Time
+	timer := fc.NewTimer(d)
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-done:
+				break
+			case now := <-timer.Chan():
+				times = append(times, now)
+			}
+		}
+	}()
+	for i := 0; i < 100; i++ {
+		for j := 0; j < 10; j++ {
+			timer.Reset(d)
+		}
+		fc.Advance(d)
+	}
+	timer.Stop()
+	close(done)
+	for i := 1; i < len(times); i++ {
+		if times[i-1] == times[i] {
+			t.Fatalf("Timer repeatedly reported the same time.")
+		}
+	}
+}
+
+func TestFakeClockTimer_ZeroResetDoesNotBlock(t *testing.T) {
+	t.Parallel()
+	fc := NewFakeClock()
+	timer := fc.NewTimer(0)
+	for i := 0; i < 10; i++ {
+		timer.Reset(0)
+	}
+	<-timer.Chan()
+}
