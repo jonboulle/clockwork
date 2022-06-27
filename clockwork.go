@@ -14,6 +14,7 @@ type Clock interface {
 	Since(t time.Time) time.Duration
 	NewTicker(d time.Duration) Ticker
 	NewTimer(d time.Duration) Timer
+	AfterFunc(d time.Duration, f func()) Timer
 }
 
 // FakeClock provides an interface for a clock which can be
@@ -72,7 +73,11 @@ func (rc *realClock) NewTicker(d time.Duration) Ticker {
 }
 
 func (rc *realClock) NewTimer(d time.Duration) Timer {
-	return &realTimer{time.NewTimer(d)}
+	return realTimer{time.NewTimer(d)}
+}
+
+func (rc *realClock) AfterFunc(d time.Duration, f func()) Timer {
+	return realTimer{time.AfterFunc(d, f)}
 }
 
 type fakeClock struct {
@@ -133,8 +138,8 @@ func (fc *fakeClock) Since(t time.Time) time.Duration {
 	return fc.Now().Sub(t)
 }
 
-// NewTicker returns a ticker that will expire only after calls to fakeClock
-// Advance have moved the clock passed the given duration
+// NewTicker returns a ticker that will expire only after calls to FakeClock
+// Advance have moved the clock past the given duration.
 func (fc *fakeClock) NewTicker(d time.Duration) Ticker {
 	ft := &fakeTicker{
 		c:      make(chan time.Time, 1),
@@ -146,8 +151,8 @@ func (fc *fakeClock) NewTicker(d time.Duration) Ticker {
 	return ft
 }
 
-// NewTimer returns a timer that will fire only after calls to fakeClock
-// Advance have moved the clock passed the given duration
+// NewTimer returns a timer that will fire only after calls to FakeClock Advance
+// have moved the clock past the given duration.
 func (fc *fakeClock) NewTimer(d time.Duration) Timer {
 	done := make(chan time.Time, 1)
 	ft := &fakeTimer{
@@ -159,6 +164,17 @@ func (fc *fakeClock) NewTimer(d time.Duration) Timer {
 			default:
 			}
 		},
+	}
+	ft.Reset(d)
+	return ft
+}
+
+// AfterFunc returns a timer that will invoke the given function only after
+// calls to fakeClock Advance have moved the clock passed the given duration.
+func (fc *fakeClock) AfterFunc(d time.Duration, f func()) Timer {
+	ft := &fakeTimer{
+		clock:    fc,
+		callback: func(_ time.Time) { go f() },
 	}
 	ft.Reset(d)
 	return ft

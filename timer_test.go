@@ -175,3 +175,51 @@ func TestFakeClockTimer_ZeroResetDoesNotBlock(t *testing.T) {
 	}
 	<-timer.Chan()
 }
+
+func TestAfterFunc_Concurrent(t *testing.T) {
+	timeout := time.NewTimer(500 * time.Millisecond)
+	defer timeout.Stop()
+
+	fc := NewFakeClock()
+	blocker := make(chan struct{})
+	ch := make(chan int)
+	// AfterFunc should start goroutines, so each should be able to make progress
+	// independent of the others.
+	fc.AfterFunc(2*time.Second, func() {
+		<-blocker
+		ch <- 222
+	})
+	fc.AfterFunc(2*time.Second, func() {
+		ch <- 111
+	})
+	fc.AfterFunc(2*time.Second, func() {
+		<-blocker
+		ch <- 222
+	})
+	fc.Advance(2 * time.Second)
+	select {
+	case a := <-ch:
+		if a != 111 {
+			t.Fatalf("Expected 111, got %d", a)
+		}
+	case <-timeout.C:
+		t.Fatalf("Expected signal hasn't arrived")
+	}
+	close(blocker)
+	select {
+	case a := <-ch:
+		if a != 222 {
+			t.Fatalf("Expected 222, got %d", a)
+		}
+	case <-timeout.C:
+		t.Fatalf("Expected signal hasn't arrived")
+	}
+	select {
+	case a := <-ch:
+		if a != 222 {
+			t.Fatalf("Expected 222, got %d", a)
+		}
+	case <-timeout.C:
+		t.Fatalf("Expected signal hasn't arrived")
+	}
+}
