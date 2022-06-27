@@ -168,3 +168,23 @@ func TestTwoBlockersOneBlock(t *testing.T) {
 	ft1.Stop()
 	ft2.Stop()
 }
+
+func TestAfterDeliveryInOrder(t *testing.T) {
+	fc := &fakeClock{}
+	for i := 0; i < 1000; i++ {
+		three := fc.After(3 * time.Second)
+		for j := 0; j < 100; j++ {
+			fc.After(1 * time.Second)
+		}
+		two := fc.After(2 * time.Second)
+		go func() {
+			fc.Advance(5 * time.Second)
+		}()
+		<-three
+		select {
+		case <-two:
+		default:
+			t.Fatalf("Signals from After delivered out of order")
+		}
+	}
+}

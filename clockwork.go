@@ -1,6 +1,7 @@
 package clockwork
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -76,7 +77,7 @@ func (rc *realClock) NewTimer(d time.Duration) Timer {
 }
 
 type fakeClock struct {
-	sleepers []*sleeper
+	sleepers sleepers
 	blockers []*blocker
 	time     time.Time
 
@@ -95,6 +96,12 @@ type blocker struct {
 	ch    chan struct{}
 }
 
+type sleepers []*sleeper
+
+func (s sleepers) Len() int           { return len(s) }
+func (s sleepers) Less(i, j int) bool { return s[i].until.Before(s[j].until) }
+func (s sleepers) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+
 // After mimics time.After; it waits for the given duration to elapse on the
 // fakeClock, then sends the current time on the returned channel.
 func (fc *fakeClock) After(d time.Duration) <-chan time.Time {
@@ -112,6 +119,7 @@ func (fc *fakeClock) After(d time.Duration) <-chan time.Time {
 			done:  done,
 		}
 		fc.sleepers = append(fc.sleepers, s)
+		sort.Sort(fc.sleepers)
 		// and notify any blockers
 		fc.blockers = notifyBlockers(fc.blockers, len(fc.sleepers))
 	}
@@ -188,7 +196,7 @@ func (fc *fakeClock) Advance(d time.Duration) {
 	fc.l.Lock()
 	defer fc.l.Unlock()
 	end := fc.time.Add(d)
-	var newSleepers []*sleeper
+	var newSleepers sleepers
 	for _, s := range fc.sleepers {
 		if end.Sub(s.until) >= 0 {
 			s.done <- end
