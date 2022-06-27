@@ -1,7 +1,6 @@
 package clockwork
 
 import (
-	"sort"
 	"sync"
 	"time"
 )
@@ -84,19 +83,13 @@ type fakeClock struct {
 	l sync.RWMutex
 }
 
-// sleeper represents a caller of After or Sleep
-type sleeper struct {
-	until time.Time
-	done  chan time.Time
-}
-
 // blocker represents a caller of BlockUntil
 type blocker struct {
 	count int
 	ch    chan struct{}
 }
 
-type sleepers []*sleeper
+type sleepers []*fakeTimer
 
 func (s sleepers) Len() int           { return len(s) }
 func (s sleepers) Less(i, j int) bool { return s[i].until.Before(s[j].until) }
@@ -105,25 +98,7 @@ func (s sleepers) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // After mimics time.After; it waits for the given duration to elapse on the
 // fakeClock, then sends the current time on the returned channel.
 func (fc *fakeClock) After(d time.Duration) <-chan time.Time {
-	fc.l.Lock()
-	defer fc.l.Unlock()
-	now := fc.time
-	done := make(chan time.Time, 1)
-	if d.Nanoseconds() <= 0 {
-		// special case - trigger immediately
-		done <- now
-	} else {
-		// otherwise, add to the set of sleepers
-		s := &sleeper{
-			until: now.Add(d),
-			done:  done,
-		}
-		fc.sleepers = append(fc.sleepers, s)
-		sort.Sort(fc.sleepers)
-		// and notify any blockers
-		fc.blockers = notifyBlockers(fc.blockers, len(fc.sleepers))
-	}
-	return done
+	return fc.NewTimer(d).Chan()
 }
 
 // notifyBlockers notifies all the blockers waiting until the at least the given
@@ -174,19 +149,18 @@ func (fc *fakeClock) NewTicker(d time.Duration) Ticker {
 // NewTimer returns a timer that will fire only after calls to fakeClock
 // Advance have moved the clock passed the given duration
 func (fc *fakeClock) NewTimer(d time.Duration) Timer {
-	stopped := uint32(0)
-	if d <= 0 {
-		stopped = 1
-	}
+	done := make(chan time.Time, 1)
 	ft := &fakeTimer{
-		c:       make(chan time.Time, 1),
-		stop:    make(chan struct{}, 1),
-		reset:   make(chan reset, 1),
-		clock:   fc,
-		stopped: stopped,
+		c:     done,
+		clock: fc,
+		callback: func(now time.Time) {
+			select {
+			case done <- now:
+			default:
+			}
+		},
 	}
-
-	ft.run(d)
+	ft.Reset(d)
 	return ft
 }
 
@@ -198,10 +172,11 @@ func (fc *fakeClock) Advance(d time.Duration) {
 	end := fc.time.Add(d)
 	var newSleepers sleepers
 	for _, s := range fc.sleepers {
-		if end.Sub(s.until) >= 0 {
-			s.done <- end
-		} else {
+		if end.Before(s.until) {
+			// Not due yet.
 			newSleepers = append(newSleepers, s)
+		} else {
+			s.callback(s.until)
 		}
 	}
 	fc.sleepers = newSleepers

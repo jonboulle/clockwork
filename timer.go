@@ -1,7 +1,7 @@
 package clockwork
 
 import (
-	"sync/atomic"
+	"sort"
 	"time"
 )
 
@@ -24,74 +24,65 @@ func (r realTimer) Chan() <-chan time.Time {
 }
 
 type fakeTimer struct {
-	c       chan time.Time
-	clock   FakeClock
-	stop    chan struct{}
-	reset   chan reset
-	stopped uint32
+	// The channel associated with this timer. Only relevant for timers that
+	// originate from NewTimer or similar, i.e. not for AfterFunc or other
+	// internal usage.
+	c chan time.Time
+
+	// The fake clock driving events for this timer.
+	clock *fakeClock
+
+	// The time when the timer expires. Only meaningful if the timer is currently
+	// one of the fake clock's sleepers.
+	until time.Time
+
+	// callback will get called synchronously with the lock of the clock being
+	// held. It receives the time at which the timer expired.
+	callback func(time.Time)
 }
 
 func (f *fakeTimer) Chan() <-chan time.Time {
 	return f.c
 }
 
-func (f *fakeTimer) Reset(d time.Duration) bool {
-	stopped := f.Stop()
-
-	f.reset <- reset{t: f.clock.Now().Add(d), next: f.clock.After(d)}
-	if d > 0 {
-		atomic.StoreUint32(&f.stopped, 0)
-	}
-
-	return stopped
+func (f *fakeTimer) Stop() bool {
+	f.clock.l.Lock()
+	defer f.clock.l.Unlock()
+	return f.stopImpl()
 }
 
-func (f *fakeTimer) Stop() bool {
-	if atomic.CompareAndSwapUint32(&f.stopped, 0, 1) {
-		f.stop <- struct{}{}
-		return true
+func (f *fakeTimer) stopImpl() bool {
+	for i, t := range f.clock.sleepers {
+		if t == f {
+			// Remove element, maintaining order.
+			copy(f.clock.sleepers[i:], f.clock.sleepers[i+1:])
+			f.clock.sleepers[len(f.clock.sleepers)-1] = nil
+			f.clock.sleepers = f.clock.sleepers[:len(f.clock.sleepers)-1]
+			return true
+		}
 	}
 	return false
 }
 
-type reset struct {
-	t    time.Time
-	next <-chan time.Time
+func (f *fakeTimer) Reset(d time.Duration) bool {
+	f.clock.l.Lock()
+	defer f.clock.l.Unlock()
+	stopped := f.stopImpl()
+	f.resetImpl(d)
+	return stopped
 }
 
-// run initializes a background goroutine to send the timer event to the timer channel
-// after the period. Events are discarded if the underlying ticker channel does not have
-// enough capacity.
-func (f *fakeTimer) run(initialDuration time.Duration) {
-	nextTick := f.clock.Now().Add(initialDuration)
-	next := f.clock.After(initialDuration)
-
-	waitForReset := func() (time.Time, <-chan time.Time) {
-		for {
-			select {
-			case <-f.stop:
-				continue
-			case r := <-f.reset:
-				return r.t, r.next
-			}
-		}
+func (f *fakeTimer) resetImpl(d time.Duration) {
+	now := f.clock.time
+	if d.Nanoseconds() <= 0 {
+		// special case - trigger immediately
+		f.callback(now)
+	} else {
+		// otherwise, add to the set of sleepers
+		f.until = f.clock.time.Add(d)
+		f.clock.sleepers = append(f.clock.sleepers, f)
+		sort.Sort(f.clock.sleepers)
+		// and notify any blockers
+		f.clock.blockers = notifyBlockers(f.clock.blockers, len(f.clock.sleepers))
 	}
-
-	go func() {
-		for {
-			select {
-			case <-f.stop:
-			case <-next:
-				atomic.StoreUint32(&f.stopped, 1)
-				select {
-				case f.c <- nextTick:
-				default:
-				}
-
-				next = nil
-			}
-
-			nextTick, next = waitForReset()
-		}
-	}()
 }
