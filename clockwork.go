@@ -69,7 +69,7 @@ func (rc *realClock) Since(t time.Time) time.Duration {
 }
 
 func (rc *realClock) NewTicker(d time.Duration) Ticker {
-	return &realTicker{time.NewTicker(d)}
+	return realTicker{time.NewTicker(d)}
 }
 
 func (rc *realClock) NewTimer(d time.Duration) Timer {
@@ -141,26 +141,35 @@ func (fc *fakeClock) Since(t time.Time) time.Duration {
 // NewTicker returns a ticker that will expire only after calls to FakeClock
 // Advance have moved the clock past the given duration.
 func (fc *fakeClock) NewTicker(d time.Duration) Ticker {
-	ft := &fakeTicker{
-		c:      make(chan time.Time, 1),
-		stop:   make(chan bool, 1),
-		clock:  fc,
-		period: d,
+	c := make(chan time.Time, 1)
+	var ft *fakeTicker
+	ft = &fakeTicker{
+		fakeTimer: fakeTimer{
+			c:     c,
+			clock: fc,
+			callback: func(now time.Time) {
+				ft.resetImpl(d)
+				select {
+				case c <- now:
+				default:
+				}
+			},
+		},
 	}
-	ft.runTickThread()
+	ft.Reset(d)
 	return ft
 }
 
 // NewTimer returns a timer that will fire only after calls to FakeClock Advance
 // have moved the clock past the given duration.
 func (fc *fakeClock) NewTimer(d time.Duration) Timer {
-	done := make(chan time.Time, 1)
+	c := make(chan time.Time, 1)
 	ft := &fakeTimer{
-		c:     done,
+		c:     c,
 		clock: fc,
 		callback: func(now time.Time) {
 			select {
-			case done <- now:
+			case c <- now:
 			default:
 			}
 		},
@@ -186,17 +195,15 @@ func (fc *fakeClock) Advance(d time.Duration) {
 	fc.l.Lock()
 	defer fc.l.Unlock()
 	end := fc.time.Add(d)
-	var newSleepers sleepers
-	for _, s := range fc.sleepers {
-		if end.Before(s.until) {
-			// Not due yet.
-			newSleepers = append(newSleepers, s)
-		} else {
-			s.callback(s.until)
-		}
+	// While first sleeper is ready to wake, wake it. We don't iterate because the
+	// callback of the sleeper might register a new sleeper, so the list of
+	// sleepers might change as we execute this.
+	for len(fc.sleepers) > 0 && !end.Before(fc.sleepers[0].until) {
+		first := fc.sleepers[0]
+		fc.sleepers = fc.sleepers[1:]
+		fc.time = first.until
+		first.callback(first.until)
 	}
-	fc.sleepers = newSleepers
-	fc.blockers = notifyBlockers(fc.blockers, len(fc.sleepers))
 	fc.time = end
 }
 
