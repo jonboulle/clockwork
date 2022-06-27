@@ -83,6 +83,6 @@ func (f *fakeTimer) resetImpl(d time.Duration) {
 		f.clock.sleepers = append(f.clock.sleepers, f)
 		sort.Sort(f.clock.sleepers)
 		// and notify any blockers
-		f.clock.blockers = notifyBlockers(f.clock.blockers, len(f.clock.sleepers))
+		f.clock.notifyBlockers()
 	}
 }

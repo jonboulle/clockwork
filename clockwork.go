@@ -106,18 +106,19 @@ func (fc *fakeClock) After(d time.Duration) <-chan time.Time {
 	return fc.NewTimer(d).Chan()
 }
 
-// notifyBlockers notifies all the blockers waiting until the at least the given
-// number of sleepers are waiting on the fakeClock. It returns an updated slice
-// of blockers (i.e. those still waiting)
-func notifyBlockers(blockers []*blocker, count int) (newBlockers []*blocker) {
-	for _, b := range blockers {
+// notifyBlockers notifies all the blockers waiting for the current number of
+// sleepers or fewer.
+func (fc *fakeClock) notifyBlockers() {
+	var stillWaiting []*blocker
+	count := len(fc.sleepers)
+	for _, b := range fc.blockers {
 		if b.count <= count {
 			close(b.ch)
 		} else {
-			newBlockers = append(newBlockers, b)
+			stillWaiting = append(stillWaiting, b)
 		}
 	}
-	return
+	fc.blockers = stillWaiting
 }
 
 // Sleep blocks until the given duration has passed on the fakeClock
