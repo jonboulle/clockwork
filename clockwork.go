@@ -14,6 +14,7 @@ type Clock interface {
 	Since(t time.Time) time.Duration
 	NewTicker(d time.Duration) Ticker
 	NewTimer(d time.Duration) Timer
+	AfterFunc(d time.Duration, f func()) Timer
 }
 
 // FakeClock provides an interface for a clock which can be
@@ -73,6 +74,10 @@ func (rc *realClock) NewTicker(d time.Duration) Ticker {
 
 func (rc *realClock) NewTimer(d time.Duration) Timer {
 	return &realTimer{time.NewTimer(d)}
+}
+
+func (rc *realClock) AfterFunc(d time.Duration, f func()) Timer {
+	return &realTimer{time.AfterFunc(d, f)}
 }
 
 type fakeClock struct {
@@ -177,6 +182,28 @@ func (fc *fakeClock) NewTimer(d time.Duration) Timer {
 		clock:   fc,
 		stopped: stopped,
 	}
+
+	ft.run(d)
+	return ft
+}
+
+// AfterFunc returns a time that will call f in its own goroutine
+// only after calls to fakeClock Advance have moved the clock passed the
+// given duration. The returned Timer can be used to Stop the call.
+func (fc *fakeClock) AfterFunc(d time.Duration, f func()) Timer {
+	stopped := uint32(0)
+	if d <= 0 {
+		stopped = 1
+	}
+	ft := &fakeTimer{
+		c:       make(chan time.Time, 1),
+		stop:    make(chan struct{}, 1),
+		reset:   make(chan reset, 1),
+		clock:   fc,
+		stopped: stopped,
+		f:       f,
+	}
+	ft.afterFunc(d)
 
 	ft.run(d)
 	return ft

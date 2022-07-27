@@ -133,3 +133,39 @@ func TestFakeClockTimer_Race2(t *testing.T) {
 	}
 	timer.Stop()
 }
+
+func TestAfterFunc(t *testing.T) {
+	t.Parallel()
+	fc := NewFakeClock()
+	start := fc.Now()
+	c := make(chan time.Time)
+	timer := fc.AfterFunc(5*time.Second, func() {
+		c <- fc.Now()
+	})
+
+	expect := func(secs int) {
+		select {
+		case nt := <-c:
+			if nt.Sub(start) != time.Second*time.Duration(secs) {
+				t.Fatalf("expected call at exactly %d seconds, not %d", secs, nt.Sub(start))
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("expecting afterfunc to fire, gave up waiting")
+		}
+	}
+
+	fc.Advance(time.Second * 5) // total: 5
+	expect(5)
+
+	fc.Advance(time.Second) // total: 6
+	timer.Reset(0)          // should fire immediately
+	expect(6)
+
+	timer.Reset(time.Second)
+	fc.Advance(time.Second) // total: 7
+	expect(7)
+
+	timer.Reset(time.Second)
+	fc.Advance(time.Second * 10) // total: 17
+	expect(17)                   // fake clock blows right past...
+}

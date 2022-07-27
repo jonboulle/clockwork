@@ -29,6 +29,7 @@ type fakeTimer struct {
 	stop    chan struct{}
 	reset   chan reset
 	stopped uint32
+	f       func()
 }
 
 func (f *fakeTimer) Chan() <-chan time.Time {
@@ -42,8 +43,25 @@ func (f *fakeTimer) Reset(d time.Duration) bool {
 	if d > 0 {
 		atomic.StoreUint32(&f.stopped, 0)
 	}
+	if f.f != nil {
+		f.afterFunc(d)
+	}
 
 	return stopped
+}
+
+func (f *fakeTimer) afterFunc(d time.Duration) {
+	go func() {
+		if d <= 0 {
+			f.f()
+		} else {
+			select {
+			case <-f.stop:
+			case <-f.c:
+				f.f()
+			}
+		}
+	}()
 }
 
 func (f *fakeTimer) Stop() bool {
