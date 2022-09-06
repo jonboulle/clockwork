@@ -87,3 +87,27 @@ func TestFakeTicker_Race2(t *testing.T) {
 	}
 	ft.Stop()
 }
+
+func TestFakeTicker_Blocks(t *testing.T) {
+	fc := NewFakeClock()
+	ticker := fc.NewTicker(time.Second)
+	start := fc.Now()
+	go func() {
+		for i := 0; i < 4; i++ {
+			fc.BlockUntil(1)
+			fc.Advance(time.Second)
+		}
+	}()
+
+	wantTick := start.Add(4 * time.Second)
+	var lastTick time.Time
+	for i := 0; i < 4; i++ {
+		<-ticker.Chan()
+		lastTick = fc.Now()
+		t.Logf("Got a tick at time %v. Simulating doing something expensive.", fc.Now())
+		time.Sleep(time.Second)
+	}
+	if wantTick != lastTick {
+		t.Errorf("wrong tick times, want %v got %v", wantTick, lastTick)
+	}
+}
