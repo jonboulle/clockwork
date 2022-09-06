@@ -62,10 +62,7 @@ func (ft *fakeTicker) runTickThread() {
 				remaining := nextTick.Sub(now)
 				next = ft.clock.After(remaining)
 				// Finally, we can actually send the tick.
-				select {
-				case ft.c <- tick:
-				default:
-				}
+				ft.c <- tick
 			}
 		}
 	}()
