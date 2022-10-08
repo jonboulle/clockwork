@@ -1,6 +1,7 @@
 package clockwork
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -141,11 +142,16 @@ func TestFakeClockTimer_ResetRace(t *testing.T) {
 	var times []time.Time
 	timer := fc.NewTimer(d)
 	done := make(chan struct{})
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+
 	go func() {
 		for {
 			select {
 			case <-done:
-				break
+				wg.Done()
+				return
 			case now := <-timer.Chan():
 				times = append(times, now)
 			}
@@ -159,6 +165,7 @@ func TestFakeClockTimer_ResetRace(t *testing.T) {
 	}
 	timer.Stop()
 	close(done)
+	wg.Wait()
 	for i := 1; i < len(times); i++ {
 		if times[i-1] == times[i] {
 			t.Fatalf("Timer repeatedly reported the same time.")
