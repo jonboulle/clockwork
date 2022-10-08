@@ -87,9 +87,12 @@ func TestNotifyBlockers(t *testing.T) {
 	b3 := &blocker{5, make(chan struct{})}
 	b4 := &blocker{10, make(chan struct{})}
 	b5 := &blocker{10, make(chan struct{})}
-	bs := []*blocker{b1, b2, b3, b4, b5}
-	bs1 := notifyBlockers(bs, 2)
-	if n := len(bs1); n != 3 {
+	fc := fakeClock{
+		blockers: []*blocker{b1, b2, b3, b4, b5},
+		sleepers: sleepers{nil, nil},
+	}
+	fc.notifyBlockers()
+	if n := len(fc.blockers); n != 3 {
 		t.Fatalf("got %d blockers, want %d", n, 3)
 	}
 	select {
@@ -102,8 +105,11 @@ func TestNotifyBlockers(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatalf("timed out waiting for channel close!")
 	}
-	bs2 := notifyBlockers(bs1, 10)
-	if n := len(bs2); n != 0 {
+	for len(fc.sleepers) < 10 {
+		fc.sleepers = append(fc.sleepers, nil)
+	}
+	fc.notifyBlockers()
+	if n := len(fc.blockers); n != 0 {
 		t.Fatalf("got %d blockers, want %d", n, 0)
 	}
 	select {
@@ -167,4 +173,24 @@ func TestTwoBlockersOneBlock(t *testing.T) {
 	fc.BlockUntil(2)
 	ft1.Stop()
 	ft2.Stop()
+}
+
+func TestAfterDeliveryInOrder(t *testing.T) {
+	fc := &fakeClock{}
+	for i := 0; i < 1000; i++ {
+		three := fc.After(3 * time.Second)
+		for j := 0; j < 100; j++ {
+			fc.After(1 * time.Second)
+		}
+		two := fc.After(2 * time.Second)
+		go func() {
+			fc.Advance(5 * time.Second)
+		}()
+		<-three
+		select {
+		case <-two:
+		default:
+			t.Fatalf("Signals from After delivered out of order")
+		}
+	}
 }

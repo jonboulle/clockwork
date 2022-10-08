@@ -87,3 +87,34 @@ func TestFakeTicker_Race2(t *testing.T) {
 	}
 	ft.Stop()
 }
+
+func TestFakeTicker_DeliveryOrder(t *testing.T) {
+	for i := 0; i < 1000; i++ {
+		timeout := time.NewTimer(500 * time.Millisecond)
+		defer timeout.Stop()
+		fc := NewFakeClock()
+		ticker := fc.NewTicker(2 * time.Second).Chan()
+		timer := fc.NewTimer(5 * time.Second).Chan()
+		go func() {
+			for j := 0; j < 10; j++ {
+				fc.BlockUntil(1)
+				fc.Advance(1 * time.Second)
+			}
+		}()
+		<-ticker
+		a := <-timer
+		// Only perform ordering check if ticker channel is drained at first.
+		select {
+		case <-ticker:
+		default:
+			select {
+			case b := <-ticker:
+				if a.After(b) {
+					t.Fatalf("Expected timer before ticker, got timer %v after %v", a, b)
+				}
+			case <-timeout.C:
+				t.Fatalf("Expected ticker event didn't arrive!")
+			}
+		}
+	}
+}
