@@ -1,3 +1,3 @@
 module github.com/jonboulle/clockwork
 
-go 1.13
+go 1.15
