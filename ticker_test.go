@@ -7,6 +7,7 @@ import (
 )
 
 func TestFakeTickerStop(t *testing.T) {
+	t.Parallel()
 	fc := &fakeClock{}
 
 	ft := fc.NewTicker(1)
@@ -19,6 +20,7 @@ func TestFakeTickerStop(t *testing.T) {
 }
 
 func TestFakeTickerTick(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
@@ -63,10 +65,12 @@ func TestFakeTickerTick(t *testing.T) {
 }
 
 func TestFakeTicker_Race(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
 	fc := NewFakeClock()
+
 	tickTime := 1 * time.Millisecond
 	ticker := fc.NewTicker(tickTime)
 	defer ticker.Stop()
@@ -75,12 +79,14 @@ func TestFakeTicker_Race(t *testing.T) {
 
 	select {
 	case <-ticker.Chan():
+	// Pass
 	case <-ctx.Done():
 		t.Fatalf("Ticker didn't detect the clock advance!")
 	}
 }
 
 func TestFakeTicker_Race2(t *testing.T) {
+	t.Parallel()
 	fc := NewFakeClock()
 	ft := fc.NewTicker(5 * time.Second)
 	for i := 0; i < 100; i++ {
@@ -91,13 +97,14 @@ func TestFakeTicker_Race2(t *testing.T) {
 }
 
 func TestFakeTicker_DeliveryOrder(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	fc := NewFakeClock()
 	ticker := fc.NewTicker(2 * time.Second).Chan()
 	timer := fc.NewTimer(5 * time.Second).Chan()
 	go func() {
-		for j := 0; j < 10; j++ {
+		for j := 0; j < 100; j++ {
 			fc.BlockUntil(1)
 			fc.Advance(1 * time.Second)
 		}

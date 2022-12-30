@@ -7,6 +7,7 @@ import (
 )
 
 func TestContextOps(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	assertIsType(t, NewRealClock(), FromContext(ctx))
 
@@ -17,7 +18,7 @@ func TestContextOps(t *testing.T) {
 	assertIsType(t, NewRealClock(), FromContext(ctx))
 }
 
-func assertIsType(t *testing.T, expectedType interface{}, object interface{}) {
+func assertIsType(t *testing.T, expectedType, object any) {
 	t.Helper()
 
 	if reflect.TypeOf(object) != reflect.TypeOf(expectedType) {

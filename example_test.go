@@ -32,18 +32,18 @@ func TestMyFunc(t *testing.T) {
 		wg.Done()
 	}()
 
-	// Wait until myFunc is actually sleeping on the clock
+	// Wait until myFunc is actually sleeping on the clock.
 	c.BlockUntil(1)
 
-	// Assert the initial state
+	// Assert the initial state.
 	assertState(t, i, 0)
 
-	// Now advance the clock forward in time
+	// Now advance the clock forward in time.
 	c.Advance(1 * time.Hour)
 
-	// Wait until the function completes
+	// Wait until the function completes.
 	wg.Wait()
 
-	// Assert the final state
+	// Assert the final state.
 	assertState(t, i, 1)
 }

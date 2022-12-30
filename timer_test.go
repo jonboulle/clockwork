@@ -1,11 +1,13 @@
 package clockwork
 
 import (
+	"context"
 	"testing"
 	"time"
 )
 
 func TestFakeClockTimerStop(t *testing.T) {
+	t.Parallel()
 	fc := &fakeClock{}
 
 	ft := fc.NewTimer(1)
@@ -18,6 +20,10 @@ func TestFakeClockTimerStop(t *testing.T) {
 }
 
 func TestFakeClockTimers(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
 	fc := &fakeClock{}
 
 	zero := fc.NewTimer(0)
@@ -26,12 +32,9 @@ func TestFakeClockTimers(t *testing.T) {
 		t.Errorf("zero timer could be stopped")
 	}
 
-	timeout := time.NewTimer(500 * time.Millisecond)
-	defer timeout.Stop()
-
 	select {
 	case <-zero.Chan():
-	case <-timeout.C:
+	case <-ctx.Done():
 		t.Errorf("zero timer didn't emit time")
 	}
 
@@ -71,12 +74,9 @@ func TestFakeClockTimers(t *testing.T) {
 		t.Errorf("triggered timer could be stopped")
 	}
 
-	timeout2 := time.NewTimer(500 * time.Millisecond)
-	defer timeout2.Stop()
-
 	select {
 	case <-one.Chan():
-	case <-timeout2.C:
+	case <-ctx.Done():
 		t.Errorf("triggered timer didn't emit time")
 	}
 
@@ -94,36 +94,32 @@ func TestFakeClockTimers(t *testing.T) {
 		t.Errorf("reset to zero timer could be stopped")
 	}
 
-	timeout3 := time.NewTimer(500 * time.Millisecond)
-	defer timeout3.Stop()
-
 	select {
 	case <-one.Chan():
-	case <-timeout3.C:
+	case <-ctx.Done():
 		t.Errorf("reset to zero timer didn't emit time")
 	}
 }
 
 func TestFakeClockTimer_Race(t *testing.T) {
-	fc := NewFakeClock()
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
 
+	fc := NewFakeClock()
 	timer := fc.NewTimer(1 * time.Millisecond)
 	defer timer.Stop()
-
 	fc.Advance(1 * time.Millisecond)
-
-	timeout := time.NewTimer(500 * time.Millisecond)
-	defer timeout.Stop()
 
 	select {
 	case <-timer.Chan():
-		// Pass
-	case <-timeout.C:
+	case <-ctx.Done():
 		t.Fatalf("Timer didn't detect the clock advance!")
 	}
 }
 
 func TestFakeClockTimer_Race2(t *testing.T) {
+	t.Parallel()
 	fc := NewFakeClock()
 	timer := fc.NewTimer(5 * time.Second)
 	for i := 0; i < 100; i++ {
@@ -141,11 +137,13 @@ func TestFakeClockTimer_ResetRace(t *testing.T) {
 	var times []time.Time
 	timer := fc.NewTimer(d)
 	done := make(chan struct{})
+	doneAddingTimes := make(chan struct{})
 	go func() {
+		defer close(doneAddingTimes)
 		for {
 			select {
 			case <-done:
-				break
+				return
 			case now := <-timer.Chan():
 				times = append(times, now)
 			}
@@ -159,6 +157,7 @@ func TestFakeClockTimer_ResetRace(t *testing.T) {
 	}
 	timer.Stop()
 	close(done)
+	<-doneAddingTimes // Prevent race condition on times.
 	for i := 1; i < len(times); i++ {
 		if times[i-1] == times[i] {
 			t.Fatalf("Timer repeatedly reported the same time.")
@@ -177,9 +176,9 @@ func TestFakeClockTimer_ZeroResetDoesNotBlock(t *testing.T) {
 }
 
 func TestAfterFunc_Concurrent(t *testing.T) {
-	timeout := time.NewTimer(500 * time.Millisecond)
-	defer timeout.Stop()
-
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
 	fc := NewFakeClock()
 	blocker := make(chan struct{})
 	ch := make(chan int)
@@ -202,7 +201,7 @@ func TestAfterFunc_Concurrent(t *testing.T) {
 		if a != 111 {
 			t.Fatalf("Expected 111, got %d", a)
 		}
-	case <-timeout.C:
+	case <-ctx.Done():
 		t.Fatalf("Expected signal hasn't arrived")
 	}
 	close(blocker)
@@ -211,7 +210,7 @@ func TestAfterFunc_Concurrent(t *testing.T) {
 		if a != 222 {
 			t.Fatalf("Expected 222, got %d", a)
 		}
-	case <-timeout.C:
+	case <-ctx.Done():
 		t.Fatalf("Expected signal hasn't arrived")
 	}
 	select {
@@ -219,7 +218,7 @@ func TestAfterFunc_Concurrent(t *testing.T) {
 		if a != 222 {
 			t.Fatalf("Expected 222, got %d", a)
 		}
-	case <-timeout.C:
+	case <-ctx.Done():
 		t.Fatalf("Expected signal hasn't arrived")
 	}
 }
