@@ -1,11 +1,13 @@
 package clockwork
 
 import (
+	"context"
 	"testing"
 	"time"
 )
 
 func TestFakeTickerStop(t *testing.T) {
+	t.Parallel()
 	fc := &fakeClock{}
 
 	ft := fc.NewTicker(1)
@@ -18,6 +20,10 @@ func TestFakeTickerStop(t *testing.T) {
 }
 
 func TestFakeTickerTick(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	fc := &fakeClock{}
 	now := fc.Now()
 
@@ -39,7 +45,7 @@ func TestFakeTickerTick(t *testing.T) {
 		if tick != first {
 			t.Errorf("wrong tick time, got: %v, want: %v", tick, first)
 		}
-	case <-time.After(time.Millisecond):
+	case <-ctx.Done():
 		t.Errorf("expected tick!")
 	}
 
@@ -52,13 +58,17 @@ func TestFakeTickerTick(t *testing.T) {
 		if tick != second {
 			t.Errorf("wrong tick time, got: %v, want: %v", tick, second)
 		}
-	case <-time.After(time.Millisecond):
+	case <-ctx.Done():
 		t.Errorf("expected tick!")
 	}
 	ft.Stop()
 }
 
 func TestFakeTicker_Race(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	fc := NewFakeClock()
 
 	tickTime := 1 * time.Millisecond
@@ -67,54 +77,57 @@ func TestFakeTicker_Race(t *testing.T) {
 
 	fc.Advance(tickTime)
 
-	timeout := time.NewTimer(500 * time.Millisecond)
-	defer timeout.Stop()
-
 	select {
 	case <-ticker.Chan():
-		// Pass
-	case <-timeout.C:
+	case <-ctx.Done():
 		t.Fatalf("Ticker didn't detect the clock advance!")
 	}
 }
 
 func TestFakeTicker_Race2(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 	fc := NewFakeClock()
 	ft := fc.NewTicker(5 * time.Second)
 	for i := 0; i < 100; i++ {
 		fc.Advance(5 * time.Second)
-		<-ft.Chan()
+		select {
+		case <-ft.Chan():
+		case <-ctx.Done():
+			t.Fatalf("Ticker didn't detect the clock advance!")
+		}
+
 	}
 	ft.Stop()
 }
 
 func TestFakeTicker_DeliveryOrder(t *testing.T) {
-	for i := 0; i < 1000; i++ {
-		timeout := time.NewTimer(500 * time.Millisecond)
-		defer timeout.Stop()
-		fc := NewFakeClock()
-		ticker := fc.NewTicker(2 * time.Second).Chan()
-		timer := fc.NewTimer(5 * time.Second).Chan()
-		go func() {
-			for j := 0; j < 10; j++ {
-				fc.BlockUntil(1)
-				fc.Advance(1 * time.Second)
-			}
-		}()
-		<-ticker
-		a := <-timer
-		// Only perform ordering check if ticker channel is drained at first.
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	fc := NewFakeClock()
+	ticker := fc.NewTicker(2 * time.Second).Chan()
+	timer := fc.NewTimer(5 * time.Second).Chan()
+	go func() {
+		for j := 0; j < 10; j++ {
+			fc.BlockUntil(1)
+			fc.Advance(1 * time.Second)
+		}
+	}()
+	<-ticker
+	a := <-timer
+	// Only perform ordering check if ticker channel is drained at first.
+	select {
+	case <-ticker:
+	default:
 		select {
-		case <-ticker:
-		default:
-			select {
-			case b := <-ticker:
-				if a.After(b) {
-					t.Fatalf("Expected timer before ticker, got timer %v after %v", a, b)
-				}
-			case <-timeout.C:
-				t.Fatalf("Expected ticker event didn't arrive!")
+		case b := <-ticker:
+			if a.After(b) {
+				t.Fatalf("Expected timer before ticker, got timer %v after %v", a, b)
 			}
+		case <-ctx.Done():
+			t.Fatalf("Expected ticker event didn't arrive!")
 		}
 	}
 }
