@@ -11,6 +11,7 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         go: ['1.15', '1.16', '1.17', '1.18', '1.19']
 
