@@ -96,7 +96,7 @@ func TestNotifyBlockers(t *testing.T) {
 	b5 := &blocker{10, make(chan struct{})}
 	fc := fakeClock{
 		blockers: []*blocker{b1, b2, b3, b4, b5},
-		sleepers: sleepers{nil, nil},
+		waiters:  []expirer{nil, nil},
 	}
 	fc.notifyBlockers()
 	if n := len(fc.blockers); n != 3 {
@@ -112,8 +112,8 @@ func TestNotifyBlockers(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatalf("timed out waiting for channel close!")
 	}
-	for len(fc.sleepers) < 10 {
-		fc.sleepers = append(fc.sleepers, nil)
+	for len(fc.waiters) < 10 {
+		fc.waiters = append(fc.waiters, nil)
 	}
 	fc.notifyBlockers()
 	if n := len(fc.blockers); n != 0 {

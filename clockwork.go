@@ -1,12 +1,13 @@
 package clockwork
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
 
-// Clock provides an interface that packages can use instead of directly
-// using the time module, so that chronology-related behavior can be tested
+// Clock provides an interface that packages can use instead of directly using
+// the [time] module, so that chronology-related behavior can be tested.
 type Clock interface {
 	After(d time.Duration) <-chan time.Time
 	Sleep(d time.Duration)
@@ -17,16 +18,20 @@ type Clock interface {
 	AfterFunc(d time.Duration, f func()) Timer
 }
 
-// FakeClock provides an interface for a clock which can be
-// manually advanced through time
+// FakeClock provides an interface for a clock which can be manually advanced
+// through time.
+//
+// FakeClock maintains a list of "waiters," which consists of all callers
+// waiting on the underlying clock (i.e. Tickers and Timers including callers of
+// Sleep or After). Users can call BlockUntil to block until the clock has an
+// expected number of waiters.
 type FakeClock interface {
 	Clock
 	// Advance advances the FakeClock to a new point in time, ensuring any existing
-	// sleepers are notified appropriately before returning
+	// waiters are notified appropriately before returning.
 	Advance(d time.Duration)
-	// BlockUntil will block until the FakeClock has the given number of
-	// sleepers (callers of Sleep or After)
-	BlockUntil(n int)
+	// BlockUntil blocks until the FakeClock has the given number of waiters.
+	BlockUntil(waiters int)
 }
 
 // NewRealClock returns a Clock which simply delegates calls to the actual time
@@ -39,8 +44,8 @@ func NewRealClock() Clock {
 // manually advanced through time for testing. The initial time of the
 // FakeClock will be an arbitrary non-zero time.
 func NewFakeClock() FakeClock {
-	// use a fixture that does not fulfill Time.IsZero()
-	return NewFakeClockAt(time.Date(1984, time.April, 4, 0, 0, 0, 0, time.UTC))
+	// Use the standard layout time to avoid fulfilling Time.IsZero().
+	return NewFakeClockAt(time.Date(2006, time.January, 2, 15, 4, 5, 0, time.UTC))
 }
 
 // NewFakeClockAt returns a FakeClock initialised at the given time.Time.
@@ -81,47 +86,55 @@ func (rc *realClock) AfterFunc(d time.Duration, f func()) Timer {
 }
 
 type fakeClock struct {
-	sleepers sleepers
+	// l protects all attributes of the clock, including all attributes of all
+	// waiters and blockers.
+	l        sync.RWMutex
+	waiters  []expirer
 	blockers []*blocker
 	time     time.Time
-
-	l sync.RWMutex
 }
 
-// blocker represents a caller of BlockUntil
+// blocker is a caller of BlockUntil.
 type blocker struct {
 	count int
-	ch    chan struct{}
+
+	// ch is closed when the underlying clock has the specificed number of blockers.
+	ch chan struct{}
 }
 
-type sleepers []*fakeTimer
+// expirer is a timer or ticker that expires at some point in the future.
+type expirer interface {
+	// expire the expirer at the given time, returning the desired duration until
+	// the next expiration, if any.
+	expire(now time.Time) (next *time.Duration)
 
-func (s sleepers) Len() int           { return len(s) }
-func (s sleepers) Less(i, j int) bool { return s[i].until.Before(s[j].until) }
-func (s sleepers) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+	// Get and set the expiration time.
+	expiry() time.Time
+	setExpiry(time.Time)
+}
 
-// After mimics time.After; it waits for the given duration to elapse on the
+// After mimics [time.After]; it waits for the given duration to elapse on the
 // fakeClock, then sends the current time on the returned channel.
 func (fc *fakeClock) After(d time.Duration) <-chan time.Time {
 	return fc.NewTimer(d).Chan()
 }
 
-// notifyBlockers notifies all the blockers waiting for the current number of
-// sleepers or fewer.
+// notifyBlockers closes the receive channel for all blockers waiting for the
+// current number of waiters (or fewer).
 func (fc *fakeClock) notifyBlockers() {
-	var stillWaiting []*blocker
-	count := len(fc.sleepers)
+	var blocked []*blocker
+	count := len(fc.waiters)
 	for _, b := range fc.blockers {
 		if b.count <= count {
 			close(b.ch)
-		} else {
-			stillWaiting = append(stillWaiting, b)
+			continue
 		}
+		blocked = append(blocked, b)
 	}
-	fc.blockers = stillWaiting
+	fc.blockers = blocked
 }
 
-// Sleep blocks until the given duration has passed on the fakeClock
+// Sleep blocks until the given duration has past on the fakeClock.
 func (fc *fakeClock) Sleep(d time.Duration) {
 	<-fc.After(d)
 }
@@ -129,95 +142,99 @@ func (fc *fakeClock) Sleep(d time.Duration) {
 // Now returns the current time of the fakeClock
 func (fc *fakeClock) Now() time.Time {
 	fc.l.RLock()
-	t := fc.time
-	fc.l.RUnlock()
-	return t
+	defer fc.l.RUnlock()
+	return fc.time
 }
 
-// Since returns the duration that has passed since the given time on the fakeClock
+// Since returns the duration that has past since the given time on the
+// fakeClock.
 func (fc *fakeClock) Since(t time.Time) time.Duration {
 	return fc.Now().Sub(t)
 }
 
-// NewTicker returns a ticker that will expire only after calls to FakeClock
-// Advance have moved the clock past the given duration.
+// NewTicker returns a Ticker that will expire only after calls to
+// fakeClock.Advance() have moved the clock past the given duration.
 func (fc *fakeClock) NewTicker(d time.Duration) Ticker {
-	c := make(chan time.Time, 1)
 	var ft *fakeTicker
 	ft = &fakeTicker{
-		fakeTimer: fakeTimer{
-			c:     c,
-			clock: fc,
-			callback: func(now time.Time) {
-				ft.resetImpl(d)
-				select {
-				case c <- now:
-				default:
-				}
-			},
-		},
+		firer: newFirer(),
+		d:     d,
+		reset: func(d time.Duration) { fc.set(ft, d) },
+		stop:  func() { fc.stop(ft) },
 	}
-	ft.Reset(d)
+	fc.set(ft, d)
 	return ft
 }
 
-// NewTimer returns a timer that will fire only after calls to FakeClock Advance
-// have moved the clock past the given duration.
+// NewTimer returns a Timer that will fire only after calls to
+// fakeClock.Advance() have moved the clock past the given duration.
 func (fc *fakeClock) NewTimer(d time.Duration) Timer {
-	c := make(chan time.Time, 1)
-	ft := &fakeTimer{
-		c:     c,
-		clock: fc,
-		callback: func(now time.Time) {
-			select {
-			case c <- now:
-			default:
-			}
-		},
-	}
-	ft.Reset(d)
-	return ft
+	return fc.newTimer(d, nil)
 }
 
-// AfterFunc returns a timer that will invoke the given function only after
-// calls to fakeClock Advance have moved the clock passed the given duration.
+// AfterFunc mimics [time.AfterFunc]; it returns a Timer that will invoke the
+// given function only after calls to fakeClock.Advance() have moved the clock
+// past the given duration.
 func (fc *fakeClock) AfterFunc(d time.Duration, f func()) Timer {
-	ft := &fakeTimer{
-		clock:    fc,
-		callback: func(_ time.Time) { go f() },
+	return fc.newTimer(d, f)
+}
+
+// newTimer returns a new timer, using an optional afterFunc.
+func (fc *fakeClock) newTimer(d time.Duration, afterfunc func()) *fakeTimer {
+	var ft *fakeTimer
+	ft = &fakeTimer{
+		firer: newFirer(),
+		reset: func(d time.Duration) bool {
+			fc.l.Lock()
+			defer fc.l.Unlock()
+			// fc.l must be held across the calls to stopExpirer & setExpirer.
+			stopped := fc.stopExpirer(ft)
+			fc.setExpirer(ft, d)
+			return stopped
+		},
+		stop: func() bool { return fc.stop(ft) },
+
+		afterFunc: afterfunc,
 	}
-	ft.Reset(d)
+	fc.set(ft, d)
 	return ft
 }
 
-// Advance advances fakeClock to a new point in time, ensuring channels from any
-// previous invocations of After are notified appropriately before returning
+// Advance advances fakeClock to a new point in time, ensuring waiters and
+// blockers are notified appropriately before returning.
 func (fc *fakeClock) Advance(d time.Duration) {
 	fc.l.Lock()
 	defer fc.l.Unlock()
 	end := fc.time.Add(d)
-	// While first sleeper is ready to wake, wake it. We don't iterate because the
-	// callback of the sleeper might register a new sleeper, so the list of
-	// sleepers might change as we execute this.
-	for len(fc.sleepers) > 0 && !end.Before(fc.sleepers[0].until) {
-		first := fc.sleepers[0]
-		fc.sleepers = fc.sleepers[1:]
-		fc.time = first.until
-		first.callback(first.until)
+	// Expire the earliest waiter until the earliest waiter's expiration is after
+	// end.
+	//
+	// We don't iterate because the callback of the waiter might register a new
+	// waiter, so the list of waiters might change as we execute this.
+	for len(fc.waiters) > 0 && !end.Before(fc.waiters[0].expiry()) {
+		w := fc.waiters[0]
+		fc.waiters = fc.waiters[1:]
+
+		// Use the waiter's expriation as the current time for this expiration.
+		now := w.expiry()
+		fc.time = now
+		if d := w.expire(now); d != nil {
+			// Set the new exipration if needed.
+			fc.setExpirer(w, *d)
+		}
 	}
 	fc.time = end
 }
 
-// BlockUntil will block until the fakeClock has the given number of sleepers
-// (callers of Sleep or After)
+// BlockUntil blocks until the fakeClock has the given number of waiters.
 func (fc *fakeClock) BlockUntil(n int) {
 	fc.l.Lock()
-	// Fast path: we already have >= n sleepers.
-	if len(fc.sleepers) >= n {
+	// Fast path: we already have >= n waiters.
+	if len(fc.waiters) >= n {
 		fc.l.Unlock()
 		return
 	}
-	// Otherwise, we have < n sleepers. Set up a new blocker to wait for more.
+	// Set up a new blocker to wait for more waiters.
 	b := &blocker{
 		count: n,
 		ch:    make(chan struct{}),
@@ -225,4 +242,82 @@ func (fc *fakeClock) BlockUntil(n int) {
 	fc.blockers = append(fc.blockers, b)
 	fc.l.Unlock()
 	<-b.ch
+}
+
+// stop stops an expirer, returning true if the expirer was stopped.
+func (fc *fakeClock) stop(e expirer) bool {
+	fc.l.Lock()
+	defer fc.l.Unlock()
+	return fc.stopExpirer(e)
+}
+
+// stopExpirer stops an expirer, returning true if the expirer was stopped.
+//
+// The caller must hold fc.l.
+func (fc *fakeClock) stopExpirer(e expirer) bool {
+	for i, t := range fc.waiters {
+		if t == e {
+			// Remove element, maintaining order.
+			copy(fc.waiters[i:], fc.waiters[i+1:])
+			fc.waiters[len(fc.waiters)-1] = nil
+			fc.waiters = fc.waiters[:len(fc.waiters)-1]
+			return true
+		}
+	}
+	return false
+}
+
+// set sets an expirer to expire at a future point in time.
+func (fc *fakeClock) set(e expirer, d time.Duration) {
+	fc.l.Lock()
+	defer fc.l.Unlock()
+	fc.setExpirer(e, d)
+}
+
+// setExpirer sets an expirer to expire at a future point in time.
+//
+// The caller must hold fc.l.
+func (fc *fakeClock) setExpirer(e expirer, d time.Duration) {
+	if d.Nanoseconds() <= 0 {
+		// special case - trigger immediately, never reset.
+		//
+		// TODO: Explain what cases this covers.
+		e.expire(fc.time)
+		return
+	}
+	// Add the expirer to the set of waiters and notify any blockers.
+	e.setExpiry(fc.time.Add(d))
+	fc.waiters = append(fc.waiters, e)
+	sort.Slice(fc.waiters, func(i int, j int) bool {
+		return fc.waiters[i].expiry().Before(fc.waiters[j].expiry())
+	})
+	fc.notifyBlockers()
+}
+
+// firer is used by fakeTimer and fakeTicker used to help implement expirer.
+type firer struct {
+	// The channel associated with the firer, used to send expriation times.
+	c chan time.Time
+
+	// The time when the firer expires. Only meaningful if the firer is currently
+	// one of a fakeClock's waiters.
+	exp time.Time
+}
+
+func newFirer() firer {
+	return firer{c: make(chan time.Time, 1)}
+}
+
+func (f *firer) Chan() <-chan time.Time {
+	return f.c
+}
+
+// expiry implements expirer.
+func (f *firer) expiry() time.Time {
+	return f.exp
+}
+
+// setExpiry implements expirer.
+func (f *firer) setExpiry(t time.Time) {
+	f.exp = t
 }
