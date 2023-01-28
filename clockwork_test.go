@@ -1,6 +1,8 @@
 package clockwork
 
 import (
+	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -87,55 +89,6 @@ func TestFakeClockAfter(t *testing.T) {
 	}
 }
 
-func TestNotifyBlockers(t *testing.T) {
-	t.Parallel()
-	b1 := &blocker{1, make(chan struct{})}
-	b2 := &blocker{2, make(chan struct{})}
-	b3 := &blocker{5, make(chan struct{})}
-	b4 := &blocker{10, make(chan struct{})}
-	b5 := &blocker{10, make(chan struct{})}
-	fc := fakeClock{
-		blockers: []*blocker{b1, b2, b3, b4, b5},
-		waiters:  []expirer{nil, nil},
-	}
-	fc.notifyBlockers()
-	if n := len(fc.blockers); n != 3 {
-		t.Fatalf("got %d blockers, want %d", n, 3)
-	}
-	select {
-	case <-b1.ch:
-	case <-time.After(time.Second):
-		t.Fatalf("timed out waiting for channel close!")
-	}
-	select {
-	case <-b2.ch:
-	case <-time.After(time.Second):
-		t.Fatalf("timed out waiting for channel close!")
-	}
-	for len(fc.waiters) < 10 {
-		fc.waiters = append(fc.waiters, nil)
-	}
-	fc.notifyBlockers()
-	if n := len(fc.blockers); n != 0 {
-		t.Fatalf("got %d blockers, want %d", n, 0)
-	}
-	select {
-	case <-b3.ch:
-	case <-time.After(time.Second):
-		t.Fatalf("timed out waiting for channel close!")
-	}
-	select {
-	case <-b4.ch:
-	case <-time.After(time.Second):
-		t.Fatalf("timed out waiting for channel close!")
-	}
-	select {
-	case <-b5.ch:
-	case <-time.After(time.Second):
-		t.Fatalf("timed out waiting for channel close!")
-	}
-}
-
 func TestNewFakeClock(t *testing.T) {
 	t.Parallel()
 	fc := NewFakeClock()
@@ -184,6 +137,34 @@ func TestTwoBlockersOneBlock(t *testing.T) {
 	fc.BlockUntil(2)
 	ft1.Stop()
 	ft2.Stop()
+}
+
+func TestBlockUntilContext(t *testing.T) {
+	t.Parallel()
+	fc := &fakeClock{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	blockCtx, cancelBlock := context.WithCancel(ctx)
+	errCh := make(chan error)
+
+	go func() {
+		select {
+		case errCh <- fc.BlockUntilContext(blockCtx, 2):
+		case <-ctx.Done(): // Error case, captured below.
+		}
+	}()
+	cancelBlock()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("BlockUntilContext returned %v, want context.Canceled.", err)
+		}
+	case <-ctx.Done():
+		t.Errorf("Never receved error on context cancellation.")
+	}
 }
 
 func TestAfterDeliveryInOrder(t *testing.T) {

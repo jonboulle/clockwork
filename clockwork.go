@@ -1,6 +1,7 @@
 package clockwork
 
 import (
+	"context"
 	"sort"
 	"sync"
 	"time"
@@ -119,22 +120,7 @@ func (fc *fakeClock) After(d time.Duration) <-chan time.Time {
 	return fc.NewTimer(d).Chan()
 }
 
-// notifyBlockers closes the receive channel for all blockers waiting for the
-// current number of waiters (or fewer).
-func (fc *fakeClock) notifyBlockers() {
-	var blocked []*blocker
-	count := len(fc.waiters)
-	for _, b := range fc.blockers {
-		if b.count <= count {
-			close(b.ch)
-			continue
-		}
-		blocked = append(blocked, b)
-	}
-	fc.blockers = blocked
-}
-
-// Sleep blocks until the given duration has past on the fakeClock.
+// Sleep blocks until the given duration has passed on the fakeClock.
 func (fc *fakeClock) Sleep(d time.Duration) {
 	<-fc.After(d)
 }
@@ -146,7 +132,7 @@ func (fc *fakeClock) Now() time.Time {
 	return fc.time
 }
 
-// Since returns the duration that has past since the given time on the
+// Since returns the duration that has passed since the given time on the
 // fakeClock.
 func (fc *fakeClock) Since(t time.Time) time.Duration {
 	return fc.Now().Sub(t)
@@ -227,12 +213,41 @@ func (fc *fakeClock) Advance(d time.Duration) {
 }
 
 // BlockUntil blocks until the fakeClock has the given number of waiters.
+//
+// Prefer BlockUntilContext, which offers context cancellation to prevent
+// deadlock.
+//
+// Deprecation warning: This function might be deprecated in later versions.
 func (fc *fakeClock) BlockUntil(n int) {
+	b := fc.newBlocker(n)
+	if b == nil {
+		return
+	}
+	<-b.ch
+}
+
+// BlockUntilContext blocks until the fakeClock has the given number of waiters
+// or the context is cancelled.
+func (fc *fakeClock) BlockUntilContext(ctx context.Context, n int) error {
+	b := fc.newBlocker(n)
+	if b == nil {
+		return nil
+	}
+
+	select {
+	case <-b.ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (fc *fakeClock) newBlocker(n int) *blocker {
 	fc.l.Lock()
+	defer fc.l.Unlock()
 	// Fast path: we already have >= n waiters.
 	if len(fc.waiters) >= n {
-		fc.l.Unlock()
-		return
+		return nil
 	}
 	// Set up a new blocker to wait for more waiters.
 	b := &blocker{
@@ -240,8 +255,7 @@ func (fc *fakeClock) BlockUntil(n int) {
 		ch:    make(chan struct{}),
 	}
 	fc.blockers = append(fc.blockers, b)
-	fc.l.Unlock()
-	<-b.ch
+	return b
 }
 
 // stop stops an expirer, returning true if the expirer was stopped.
@@ -291,7 +305,18 @@ func (fc *fakeClock) setExpirer(e expirer, d time.Duration) {
 	sort.Slice(fc.waiters, func(i int, j int) bool {
 		return fc.waiters[i].expiry().Before(fc.waiters[j].expiry())
 	})
-	fc.notifyBlockers()
+
+    // Notify blockers of our new waiter.
+	var blocked []*blocker
+	count := len(fc.waiters)
+	for _, b := range fc.blockers {
+		if b.count <= count {
+			close(b.ch)
+			continue
+		}
+		blocked = append(blocked, b)
+	}
+	fc.blockers = blocked
 }
 
 // firer is used by fakeTimer and fakeTicker used to help implement expirer.
