@@ -21,7 +21,7 @@ func (r realTicker) Chan() <-chan time.Time {
 type fakeTicker struct {
 	firer
 
-	// reset and stop provide the implmenetation of the respective exported
+	// reset and stop provide the implementation of the respective exported
 	// functions.
 	reset func(d time.Duration)
 	stop  func()
