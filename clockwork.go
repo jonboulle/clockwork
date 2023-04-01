@@ -43,10 +43,11 @@ func NewRealClock() Clock {
 
 // NewFakeClock returns a FakeClock implementation which can be
 // manually advanced through time for testing. The initial time of the
-// FakeClock will be an arbitrary non-zero time.
+// FakeClock will be the current system time.
+//
+// Tests that require a deterministic time must use NewFakeClockAt.
 func NewFakeClock() FakeClock {
-	// Use the standard layout time to avoid fulfilling Time.IsZero().
-	return NewFakeClockAt(time.Date(2006, time.January, 2, 15, 4, 5, 0, time.UTC))
+	return NewFakeClockAt(time.Now())
 }
 
 // NewFakeClockAt returns a FakeClock initialised at the given time.Time.
