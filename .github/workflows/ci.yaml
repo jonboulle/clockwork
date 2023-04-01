@@ -2,8 +2,7 @@ name: CI
 
 on:
   push:
-    branches:
-      - master
+    branches: [master]
   pull_request:
 
 jobs:
@@ -13,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go: ['1.15', '1.16', '1.17', '1.18', '1.19']
+        go: ['1.15', '1.16', '1.17', '1.18', '1.19', '1.20']
 
     steps:
       - name: Set up Go
