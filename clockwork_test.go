@@ -3,6 +3,7 @@ package clockwork
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -12,6 +13,20 @@ import (
 // timeouts limited while being able to easily extend it to allow the test
 // process to get killed, providing a stack trace.
 const timeout = time.Minute
+
+func ExampleDefaultClock() {
+	var mystruct struct {
+		clock DefaultClock
+	}
+
+	now := time.Date(2023, time.April, 1, 18, 30, 0, 0, time.UTC)
+
+	mystruct.clock = InitDefaultClock(NewFakeClockAt(now))
+
+	fmt.Println(mystruct.clock.Now().String())
+
+	// Output: 2023-04-01 18:30:00 +0000 UTC
+}
 
 func TestFakeClockAfter(t *testing.T) {
 	t.Parallel()

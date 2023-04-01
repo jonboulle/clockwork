@@ -86,6 +86,94 @@ func (rc realClock) AfterFunc(d time.Duration, f func()) Timer {
 	return realTimer{time.AfterFunc(d, f)}
 }
 
+// InitDefaultClock initializes a {DefaultClock} with an actual {Clock} implementation.
+func InitDefaultClock(clock Clock) DefaultClock {
+	return DefaultClock{
+		clock: clock,
+	}
+}
+
+// DefaultClock is an implementation that can be used without initialization (falling back to the real clock when uninitialized).
+//
+// One can use it in place of {Clock} so that it does not require any initialization.
+type DefaultClock struct {
+	def realClock
+
+	// This could be exported or even embedded.
+	// However, setting a value is not thread safe, so it needs to be initialized by creating a new instance.
+	clock Clock
+}
+
+// After implements the {Clock} interface.
+// It either calls the default (real) clock or the one set by {InitDefaultClock}.
+func (dc DefaultClock) After(d time.Duration) <-chan time.Time {
+	if dc.clock == nil {
+		return dc.def.After(d)
+	}
+
+	return dc.clock.After(d)
+}
+
+// Sleep implements the {Clock} interface.
+// It either calls the default (real) clock or the one set by {InitDefaultClock}.
+func (dc DefaultClock) Sleep(d time.Duration) {
+	if dc.clock == nil {
+		dc.def.Sleep(d)
+	}
+
+	dc.clock.Sleep(d)
+}
+
+// Now implements the {Clock} interface.
+// It either calls the default (real) clock or the one set by {InitDefaultClock}.
+func (dc DefaultClock) Now() time.Time {
+	if dc.clock == nil {
+		return dc.def.Now()
+	}
+
+	return dc.clock.Now()
+}
+
+// Since implements the {Clock} interface.
+// It either calls the default (real) clock or the one set by {InitDefaultClock}.
+func (dc DefaultClock) Since(t time.Time) time.Duration {
+	if dc.clock == nil {
+		return dc.def.Since(t)
+	}
+
+	return dc.clock.Since(t)
+}
+
+// NewTicker implements the {Clock} interface.
+// It either calls the default (real) clock or the one set by {InitDefaultClock}.
+func (dc DefaultClock) NewTicker(d time.Duration) Ticker {
+	if dc.clock == nil {
+		return dc.def.NewTicker(d)
+	}
+
+	return dc.clock.NewTicker(d)
+}
+
+// NewTimer implements the {Clock} interface.
+// It either calls the default (real) clock or the one set by {InitDefaultClock}.
+func (dc DefaultClock) NewTimer(d time.Duration) Timer {
+	if dc.clock == nil {
+		return dc.def.NewTimer(d)
+	}
+
+	return dc.clock.NewTimer(d)
+}
+
+// AfterFunc implements the {Clock} interface.
+// It either calls the default (real) clock or the one set by {InitDefaultClock}.
+func (dc DefaultClock) AfterFunc(d time.Duration, f func()) Timer {
+	if dc.clock == nil {
+		return dc.def.AfterFunc(d, f)
+	}
+
+	return dc.clock.AfterFunc(d, f)
+}
+
 type fakeClock struct {
 	// l protects all attributes of the clock, including all attributes of all
 	// waiters and blockers.
