@@ -38,7 +38,7 @@ type FakeClock interface {
 // NewRealClock returns a Clock which simply delegates calls to the actual time
 // package; it should be used by packages in production.
 func NewRealClock() Clock {
-	return &realClock{}
+	return realClock{}
 }
 
 // NewFakeClock returns a FakeClock implementation which can be
@@ -58,31 +58,31 @@ func NewFakeClockAt(t time.Time) FakeClock {
 
 type realClock struct{}
 
-func (rc *realClock) After(d time.Duration) <-chan time.Time {
+func (rc realClock) After(d time.Duration) <-chan time.Time {
 	return time.After(d)
 }
 
-func (rc *realClock) Sleep(d time.Duration) {
+func (rc realClock) Sleep(d time.Duration) {
 	time.Sleep(d)
 }
 
-func (rc *realClock) Now() time.Time {
+func (rc realClock) Now() time.Time {
 	return time.Now()
 }
 
-func (rc *realClock) Since(t time.Time) time.Duration {
+func (rc realClock) Since(t time.Time) time.Duration {
 	return rc.Now().Sub(t)
 }
 
-func (rc *realClock) NewTicker(d time.Duration) Ticker {
+func (rc realClock) NewTicker(d time.Duration) Ticker {
 	return realTicker{time.NewTicker(d)}
 }
 
-func (rc *realClock) NewTimer(d time.Duration) Timer {
+func (rc realClock) NewTimer(d time.Duration) Timer {
 	return realTimer{time.NewTimer(d)}
 }
 
-func (rc *realClock) AfterFunc(d time.Duration, f func()) Timer {
+func (rc realClock) AfterFunc(d time.Duration, f func()) Timer {
 	return realTimer{time.AfterFunc(d, f)}
 }
 
@@ -306,7 +306,7 @@ func (fc *fakeClock) setExpirer(e expirer, d time.Duration) {
 		return fc.waiters[i].expiry().Before(fc.waiters[j].expiry())
 	})
 
-    // Notify blockers of our new waiter.
+	// Notify blockers of our new waiter.
 	var blocked []*blocker
 	count := len(fc.waiters)
 	for _, b := range fc.blockers {
