@@ -47,7 +47,9 @@ func TestMyFunc(t *testing.T) {
 	}()
 
 	// Ensure we wait until myFunc is sleeping
-	c.BlockUntil(1)
+	if err := c.BlockUntilContext(context.Background(), 1); err != nil {
+		log.Fatalf("Error waiting for blockers: %v", err)
+	}
 
 	assertState()
 
