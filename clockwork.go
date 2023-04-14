@@ -2,7 +2,9 @@ package clockwork
 
 import (
 	"context"
+	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -28,11 +30,18 @@ type Clock interface {
 // expected number of waiters.
 type FakeClock interface {
 	Clock
-	// Advance advances the FakeClock to a new point in time, ensuring any existing
-	// waiters are notified appropriately before returning.
+	// Advance advances the FakeClock to a new point in time, ensuring any
+	// existing waiters are notified appropriately before returning.
 	Advance(d time.Duration)
 	// BlockUntil blocks until the FakeClock has the given number of waiters.
+	//
+	// Deprecation warning: This function might be deprecated or modified in
+	// breaking ways in later versions. New code should prefer BlockUntilContext,
+	// which offers context cancellation to prevent deadlock.
 	BlockUntil(waiters int)
+	// BlockUntilContext blocks until the FakeClock has the given number of
+	// waiters or the context is done.
+	BlockUntilContext(ctx context.Context, waiters int) error
 }
 
 // NewRealClock returns a Clock which simply delegates calls to the actual time
@@ -41,9 +50,9 @@ func NewRealClock() Clock {
 	return &realClock{}
 }
 
-// NewFakeClock returns a FakeClock implementation which can be
-// manually advanced through time for testing. The initial time of the
-// FakeClock will be the current system time.
+// NewFakeClock returns a FakeClock implementation which can be manually
+// advanced through time for testing. The initial time of the FakeClock will be
+// the current system time.
 //
 // Tests that require a deterministic time must use NewFakeClockAt.
 func NewFakeClock() FakeClock {
@@ -98,10 +107,22 @@ type fakeClock struct {
 
 // blocker is a caller of BlockUntil.
 type blocker struct {
-	count int
+	targetCount int
 
-	// ch is closed when the underlying clock has the specificed number of blockers.
-	ch chan struct{}
+	// ch receives blockerCounts and is closed when the underlying clock has the
+	// specified number of blockers.
+	ch chan blockerCount
+}
+
+// blockerCount is a count of blockers at a specific time. It is only used to
+// pass 2 variables through a single channel.
+type blockerCount struct {
+	blockers int
+	time     time.Time
+}
+
+func (bc blockerCount) String() string {
+	return fmt.Sprintf("{%v: %v}", bc.time.Format("2006-01-02 15:04:05.000000000"), bc.blockers)
 }
 
 // expirer is a timer or ticker that expires at some point in the future.
@@ -187,8 +208,7 @@ func (fc *fakeClock) newTimer(d time.Duration, afterfunc func()) *fakeTimer {
 	return ft
 }
 
-// Advance advances fakeClock to a new point in time, ensuring waiters and
-// blockers are notified appropriately before returning.
+// Advance implements FakeClock.Advance.
 func (fc *fakeClock) Advance(d time.Duration) {
 	fc.l.Lock()
 	defer fc.l.Unlock()
@@ -213,33 +233,30 @@ func (fc *fakeClock) Advance(d time.Duration) {
 	fc.time = end
 }
 
-// BlockUntil blocks until the fakeClock has the given number of waiters.
-//
-// Prefer BlockUntilContext, which offers context cancellation to prevent
-// deadlock.
-//
-// Deprecation warning: This function might be deprecated in later versions.
+// BlockUntilContext implements FakeClock.BlockUntil.
 func (fc *fakeClock) BlockUntil(n int) {
-	b := fc.newBlocker(n)
-	if b == nil {
-		return
-	}
-	<-b.ch
+	fc.BlockUntilContext(context.TODO(), n)
 }
 
-// BlockUntilContext blocks until the fakeClock has the given number of waiters
-// or the context is cancelled.
+// BlockUntilContext implements FakeClock.BlockUntilContext.
 func (fc *fakeClock) BlockUntilContext(ctx context.Context, n int) error {
 	b := fc.newBlocker(n)
 	if b == nil {
 		return nil
 	}
 
-	select {
-	case <-b.ch:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	var blockerCounts []string
+	for {
+		select {
+		case bc, ok := <-b.ch:
+			if !ok {
+				return nil // Channel closed, all done.
+			}
+			blockerCounts = append(blockerCounts, fmt.Sprintf("%v", bc))
+
+		case <-ctx.Done():
+			return fmt.Errorf("Did not find %v blockers before %w, blocker status: %v", n, ctx.Err(), strings.Join(blockerCounts, ", "))
+		}
 	}
 }
 
@@ -252,8 +269,8 @@ func (fc *fakeClock) newBlocker(n int) *blocker {
 	}
 	// Set up a new blocker to wait for more waiters.
 	b := &blocker{
-		count: n,
-		ch:    make(chan struct{}),
+		targetCount: n,
+		ch:          make(chan blockerCount),
 	}
 	fc.blockers = append(fc.blockers, b)
 	return b
@@ -307,11 +324,21 @@ func (fc *fakeClock) setExpirer(e expirer, d time.Duration) {
 		return fc.waiters[i].expiry().Before(fc.waiters[j].expiry())
 	})
 
-    // Notify blockers of our new waiter.
+	// Notify blockers of our new waiter.
 	var blocked []*blocker
 	count := len(fc.waiters)
+	bc := blockerCount{
+		blockers: count,
+		time: fc.time,
+	}
+
 	for _, b := range fc.blockers {
-		if b.count <= count {
+		select {
+		case b.ch <- bc: // Expected path.
+		default:
+			continue // No one listening, skip and abandon.
+		}
+		if b.targetCount <= count {
 			close(b.ch)
 			continue
 		}
