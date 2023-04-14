@@ -2,6 +2,7 @@ package clockwork
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -141,7 +142,14 @@ func (fc *fakeClock) Since(t time.Time) time.Duration {
 
 // NewTicker returns a Ticker that will expire only after calls to
 // fakeClock.Advance() have moved the clock past the given duration.
+//
+// The duration d must be greater than zero; if not, NewTicker will panic.
 func (fc *fakeClock) NewTicker(d time.Duration) Ticker {
+	// Maintain parity with
+	// https://cs.opensource.google/go/go/+/refs/tags/go1.20.3:src/time/tick.go;l=23-25
+	if d <= 0 {
+		panic(errors.New("non-positive interval for NewTicker"))
+	}
 	var ft *fakeTicker
 	ft = &fakeTicker{
 		firer: newFirer(),
