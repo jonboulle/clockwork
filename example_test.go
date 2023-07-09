@@ -46,3 +46,29 @@ func TestMyFunc(t *testing.T) {
 	// Assert the final state.
 	assertState(t, i, 1)
 }
+
+// myFunc2 is an example of a time-dependent function which uses AfterFunc.
+func myFunc2(clock Clock, i *int) {
+	clock.AfterFunc(3*time.Second, func() {
+		*i += 1
+	})
+}
+
+func TestMyFunc2(t *testing.T) {
+	var i int
+
+	// Use WithSynchronousAfterFunc to ensure that the AfterFunc callback is called by the time Advance returns.
+	c := NewFakeClock(WithSynchronousAfterFunc(true))
+
+	// Call myFunc2, which will schedule a callback to increment i.
+	myFunc2(c, &i)
+
+	// Assert the initial state.
+	assertState(t, i, 0)
+
+	// Now advance the clock forward in time to trigger the callback.
+	c.Advance(3 * time.Second)
+
+	// Assert the final state.
+	assertState(t, i, 1)
+}

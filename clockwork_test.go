@@ -3,7 +3,9 @@ package clockwork
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -198,4 +200,34 @@ func TestFakeClockRace(t *testing.T) {
 	go func() { fc.NewTicker(d) }()
 	go func() { fc.NewTimer(d) }()
 	go func() { fc.Sleep(d) }()
+}
+
+func TestFakeClockSynchronousAfterFunc(t *testing.T) {
+	t.Parallel()
+	fc := NewFakeClock(WithSynchronousAfterFunc(true))
+	var called atomic.Bool
+	fc.AfterFunc(time.Second, func() {
+		called.Store(true)
+	})
+	if called.Load() {
+		t.Fatal("AfterFunc called before Advance")
+	}
+	fc.Advance(time.Second)
+	if !called.Load() {
+		t.Fatal("AfterFunc not called after Advance")
+	}
+}
+
+func ExampleWithSynchronousAfterFunc() {
+	fc := NewFakeClock(WithSynchronousAfterFunc(true))
+	fc.AfterFunc(time.Second, func() {
+		fmt.Println("AfterFunc called")
+	})
+	fmt.Println("Calling Advance")
+	fc.Advance(time.Second)
+	fmt.Println("Advance returned")
+	// Output:
+	// Calling Advance
+	// AfterFunc called
+	// Advance returned
 }

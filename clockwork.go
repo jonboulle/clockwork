@@ -41,20 +41,36 @@ func NewRealClock() Clock {
 	return &realClock{}
 }
 
+// FakeClockOption is an option for configuring a FakeClock.
+type FakeClockOption func(*fakeClock)
+
+// WithSynchronousAfterFunc is a FakeClockOption which ensures that the callback to AfterFunc is called synchronously
+// instead of in a separate goroutine. If true, this option will cause any Advance calls to block until the callback
+// from all fired timers has completed.
+func WithSynchronousAfterFunc(b bool) FakeClockOption {
+	return func(c *fakeClock) {
+		c.synchronousAfterFunc = b
+	}
+}
+
 // NewFakeClock returns a FakeClock implementation which can be
 // manually advanced through time for testing. The initial time of the
 // FakeClock will be the current system time.
 //
 // Tests that require a deterministic time must use NewFakeClockAt.
-func NewFakeClock() FakeClock {
-	return NewFakeClockAt(time.Now())
+func NewFakeClock(opts ...FakeClockOption) FakeClock {
+	return NewFakeClockAt(time.Now(), opts...)
 }
 
 // NewFakeClockAt returns a FakeClock initialised at the given time.Time.
-func NewFakeClockAt(t time.Time) FakeClock {
-	return &fakeClock{
+func NewFakeClockAt(t time.Time, opts ...FakeClockOption) FakeClock {
+	clock := &fakeClock{
 		time: t,
 	}
+	for _, opt := range opts {
+		opt(clock)
+	}
+	return clock
 }
 
 type realClock struct{}
@@ -94,6 +110,8 @@ type fakeClock struct {
 	waiters  []expirer
 	blockers []*blocker
 	time     time.Time
+	// synchronousAfterFunc determines whether AfterFunc calls should be executed synchronously or in a goroutine.
+	synchronousAfterFunc bool
 }
 
 // blocker is a caller of BlockUntil.
@@ -181,7 +199,8 @@ func (fc *fakeClock) newTimer(d time.Duration, afterfunc func()) *fakeTimer {
 		},
 		stop: func() bool { return fc.stop(ft) },
 
-		afterFunc: afterfunc,
+		afterFunc:            afterfunc,
+		synchronousAfterFunc: fc.synchronousAfterFunc,
 	}
 	fc.set(ft, d)
 	return ft
@@ -307,7 +326,7 @@ func (fc *fakeClock) setExpirer(e expirer, d time.Duration) {
 		return fc.waiters[i].expiry().Before(fc.waiters[j].expiry())
 	})
 
-    // Notify blockers of our new waiter.
+	// Notify blockers of our new waiter.
 	var blocked []*blocker
 	count := len(fc.waiters)
 	for _, b := range fc.blockers {

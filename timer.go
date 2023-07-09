@@ -28,6 +28,8 @@ type fakeTimer struct {
 	// If present when the timer fires, the timer calls afterFunc in its own
 	// goroutine rather than sending the time on Chan().
 	afterFunc func()
+	// synchronousAfterFunc indicates that the afterFunc should be called in the same goroutine as the timer.
+	synchronousAfterFunc bool
 }
 
 func (f *fakeTimer) Reset(d time.Duration) bool {
@@ -40,7 +42,11 @@ func (f *fakeTimer) Stop() bool {
 
 func (f *fakeTimer) expire(now time.Time) *time.Duration {
 	if f.afterFunc != nil {
-		go f.afterFunc()
+		if f.synchronousAfterFunc {
+			f.afterFunc()
+		} else {
+			go f.afterFunc()
+		}
 		return nil
 	}
 
