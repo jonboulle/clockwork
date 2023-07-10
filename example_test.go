@@ -58,7 +58,7 @@ func TestMyFunc2(t *testing.T) {
 	var i int
 
 	// Use WithSynchronousAfterFunc to ensure that the AfterFunc callback is called by the time Advance returns.
-	c := NewFakeClock(WithSynchronousAfterFunc(true))
+	c := NewFakeClock(WithSynchronousAfterFunc())
 
 	// Call myFunc2, which will schedule a callback to increment i.
 	myFunc2(c, &i)

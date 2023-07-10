@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -204,22 +203,22 @@ func TestFakeClockRace(t *testing.T) {
 
 func TestFakeClockSynchronousAfterFunc(t *testing.T) {
 	t.Parallel()
-	fc := NewFakeClock(WithSynchronousAfterFunc(true))
-	var called atomic.Bool
+	fc := NewFakeClock(WithSynchronousAfterFunc())
+	var called bool
 	fc.AfterFunc(time.Second, func() {
-		called.Store(true)
+		called = true
 	})
-	if called.Load() {
+	if called {
 		t.Fatal("AfterFunc called before Advance")
 	}
 	fc.Advance(time.Second)
-	if !called.Load() {
+	if !called {
 		t.Fatal("AfterFunc not called after Advance")
 	}
 }
 
 func ExampleWithSynchronousAfterFunc() {
-	fc := NewFakeClock(WithSynchronousAfterFunc(true))
+	fc := NewFakeClock(WithSynchronousAfterFunc())
 	fc.AfterFunc(time.Second, func() {
 		fmt.Println("AfterFunc called")
 	})

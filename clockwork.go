@@ -45,11 +45,11 @@ func NewRealClock() Clock {
 type FakeClockOption func(*fakeClock)
 
 // WithSynchronousAfterFunc is a FakeClockOption which ensures that the callback to AfterFunc is called synchronously
-// instead of in a separate goroutine. If true, this option will cause any Advance calls to block until the callback
+// instead of in a separate goroutine. If set, this option will cause any Advance calls to block until the callback
 // from all fired timers has completed.
-func WithSynchronousAfterFunc(b bool) FakeClockOption {
+func WithSynchronousAfterFunc() FakeClockOption {
 	return func(c *fakeClock) {
-		c.synchronousAfterFunc = b
+		c.synchronousAfterFunc = true
 	}
 }
 
