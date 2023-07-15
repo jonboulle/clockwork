@@ -1,3 +1,4 @@
+// Package clockwork contains a simple fake clock for Go.
 package clockwork
 
 import (
@@ -28,10 +29,38 @@ type Clock interface {
 // expected number of waiters.
 type FakeClock interface {
 	Clock
-	// Advance advances the FakeClock to a new point in time, ensuring any existing
-	// waiters are notified appropriately before returning.
+
+	// Advance advances the FakeClock to a new point in time, ensuring the expiration count is updated
+	// and any existing waiters are notified appropriately before returning.
 	Advance(d time.Duration)
+
+	// Expirations returns the total number of expirations over the lifetime of the clock.
+	//
+	// The return value only increments during calls to Advance() allowing callers to, among other
+	// things, synchronously validate that a function provided to AfterFunc was not called.
+	//
+	// Expirations() increments when any of the following occur:
+	//  - A Timer expires.
+	//  - A value is sent on a channel returned by Ticker.Chan(). This happens regardless of whether
+	//    the value is received by a caller. I.e. ticks that are dropped to make up for slow receivers
+	//    still cause this value to increment. For details, see documentation on time.NewTicker.
+	//  - A valure is sent on a channel returned by After.
+	//  - A function provided to AfterFunc is called. Note this increments before the goroutine
+	//    starts, so there is no race condition.
+	//
+	// The successful stopping of a Ticker or Timer, including Timers returned by AfterFunc, do not
+	// increment Expirations().
+	Expirations() int
+
+	// BlockUntilContext blocks until the fakeClock has the given number of waiters or the context is
+	// cancelled.
+	BlockUntilContext(ctx context.Context, n int) error
+
 	// BlockUntil blocks until the FakeClock has the given number of waiters.
+	//
+	// Prefer BlockUntilContext in new code, which offers context cancellation to prevent deadlock.
+	//
+	// Deprecated: New code should prefer BlockUntilContext.
 	BlockUntil(waiters int)
 }
 
@@ -90,10 +119,11 @@ func (rc *realClock) AfterFunc(d time.Duration, f func()) Timer {
 type fakeClock struct {
 	// l protects all attributes of the clock, including all attributes of all
 	// waiters and blockers.
-	l        sync.RWMutex
-	waiters  []expirer
-	blockers []*blocker
-	time     time.Time
+	l           sync.RWMutex
+	waiters     []expirer
+	expirations int
+	blockers    []*blocker
+	time        time.Time
 }
 
 // blocker is a caller of BlockUntil.
@@ -202,11 +232,12 @@ func (fc *fakeClock) Advance(d time.Duration) {
 		w := fc.waiters[0]
 		fc.waiters = fc.waiters[1:]
 
-		// Use the waiter's expriation as the current time for this expiration.
+		// Use the waiter's expiration as the current time for this expiration.
 		now := w.expiry()
 		fc.time = now
+		fc.expirations++
 		if d := w.expire(now); d != nil {
-			// Set the new exipration if needed.
+			// Set the new expiration if needed.
 			fc.setExpirer(w, *d)
 		}
 	}
@@ -215,10 +246,10 @@ func (fc *fakeClock) Advance(d time.Duration) {
 
 // BlockUntil blocks until the fakeClock has the given number of waiters.
 //
-// Prefer BlockUntilContext, which offers context cancellation to prevent
-// deadlock.
+// Prefer BlockUntilContext in new code, which offers context cancellation to
+// prevent deadlock.
 //
-// Deprecation warning: This function might be deprecated in later versions.
+// Deprecated: New code should prefer BlockUntilContext.
 func (fc *fakeClock) BlockUntil(n int) {
 	b := fc.newBlocker(n)
 	if b == nil {
@@ -241,6 +272,12 @@ func (fc *fakeClock) BlockUntilContext(ctx context.Context, n int) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (fc *fakeClock) Expirations() int {
+	fc.l.Lock()
+	defer fc.l.Unlock()
+	return fc.expirations
 }
 
 func (fc *fakeClock) newBlocker(n int) *blocker {
@@ -307,7 +344,7 @@ func (fc *fakeClock) setExpirer(e expirer, d time.Duration) {
 		return fc.waiters[i].expiry().Before(fc.waiters[j].expiry())
 	})
 
-    // Notify blockers of our new waiter.
+	// Notify blockers of our new waiter.
 	var blocked []*blocker
 	count := len(fc.waiters)
 	for _, b := range fc.blockers {
