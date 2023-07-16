@@ -20,7 +20,7 @@ func (r realTimer) Chan() <-chan time.Time {
 type fakeTimer struct {
 	firer
 
-	// reset and stop provide the implmenetation of the respective exported
+	// reset and stop provide the implementation of the respective exported
 	// functions.
 	reset func(d time.Duration) bool
 	stop  func() bool

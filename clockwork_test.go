@@ -199,3 +199,78 @@ func TestFakeClockRace(t *testing.T) {
 	go func() { fc.NewTimer(d) }()
 	go func() { fc.Sleep(d) }()
 }
+
+func TestExpirations(t *testing.T) {
+	t.Parallel()
+
+	t.Run("AfterFunc increments counter", func(t *testing.T) {
+		fc := &fakeClock{}
+		fc.AfterFunc(time.Minute, func() {})
+		fc.AfterFunc(2*time.Minute, func() {})
+		fc.AfterFunc(2*time.Minute, func() {})
+		fc.AfterFunc(3*time.Minute, func() {})
+
+		start := fc.Now()
+
+		fc.Advance(time.Minute)
+		want := 1
+		if got := fc.Expirations(); got != want {
+			t.Errorf("after %v, fc.Expirations() = %v, want %v", fc.Since(start), got, want)
+		}
+
+		fc.Advance(time.Minute)
+		want = 3
+		if got := fc.Expirations(); got != want {
+			t.Errorf("after %v, fc.Expirations() = %v, want %v", fc.Since(start), got, want)
+		}
+
+		fc.Advance(30 * time.Second) // should not cause expirations.
+		if got := fc.Expirations(); got != want {
+			t.Errorf("after %v, fc.Expirations() = %v, want %v", fc.Since(start), got, want)
+		}
+	})
+
+	t.Run("Calls to Stop do not increment counter", func(t *testing.T) {
+		fc := &fakeClock{}
+		ticker := fc.NewTicker(time.Minute)
+		timer := fc.NewTimer(time.Minute)
+
+		start := fc.Now()
+
+		// Advance a little for good measure, but should have no effect.
+		fc.Advance(30 * time.Second)
+		want := 0
+		if got := fc.Expirations(); got != want {
+			t.Errorf("after %v, fc.Expirations() = %v, want %v", fc.Since(start), got, want)
+		}
+
+		timer.Stop()
+		ticker.Stop()
+		fc.Advance(time.Minute) // advances past the set expirations
+		if got := fc.Expirations(); got != want {
+			t.Errorf("after %v, fc.Expirations() = %v, want %v", fc.Since(start), got, want)
+		}
+	})
+
+	t.Run("Dropped ticks increment counter", func(t *testing.T) {
+		fc := &fakeClock{}
+		ticker := fc.NewTicker(time.Minute)
+
+		fc.Advance(2 * time.Minute)
+		want := 2
+		if got := fc.Expirations(); got != want {
+			t.Errorf("fc.Expirations() = %v, want %v", got, want)
+		}
+		// As of this writing I am using a variable for ticker because I don't know
+		// if assigning it to _ makes it eligible for garbage collection.
+		//
+		// Since we have to use the variable to appease the compiler, make sure we
+		// can receive on the ticker channel.
+		select {
+		case <-ticker.Chan(): //
+		default:
+			t.Errorf("Ticker should have fired at least once.")
+		}
+
+	})
+}
