@@ -1,7 +1,9 @@
+// Package clockwork contains a simple fake clock for Go.
 package clockwork
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -141,7 +143,14 @@ func (fc *fakeClock) Since(t time.Time) time.Duration {
 
 // NewTicker returns a Ticker that will expire only after calls to
 // fakeClock.Advance() have moved the clock past the given duration.
+//
+// The duration d must be greater than zero; if not, NewTicker will panic.
 func (fc *fakeClock) NewTicker(d time.Duration) Ticker {
+	// Maintain parity with
+	// https://cs.opensource.google/go/go/+/refs/tags/go1.20.3:src/time/tick.go;l=23-25
+	if d <= 0 {
+		panic(errors.New("non-positive interval for NewTicker"))
+	}
 	var ft *fakeTicker
 	ft = &fakeTicker{
 		firer: newFirer(),
@@ -294,9 +303,10 @@ func (fc *fakeClock) set(e expirer, d time.Duration) {
 // The caller must hold fc.l.
 func (fc *fakeClock) setExpirer(e expirer, d time.Duration) {
 	if d.Nanoseconds() <= 0 {
-		// special case - trigger immediately, never reset.
+		// Special case for timers with duration <= 0: trigger immediately, never
+		// reset.
 		//
-		// TODO: Explain what cases this covers.
+		// Tickers never get here, they panic if d is < 0.
 		e.expire(fc.time)
 		return
 	}
@@ -307,7 +317,7 @@ func (fc *fakeClock) setExpirer(e expirer, d time.Duration) {
 		return fc.waiters[i].expiry().Before(fc.waiters[j].expiry())
 	})
 
-    // Notify blockers of our new waiter.
+	// Notify blockers of our new waiter.
 	var blocked []*blocker
 	count := len(fc.waiters)
 	for _, b := range fc.blockers {
