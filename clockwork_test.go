@@ -15,7 +15,7 @@ const timeout = time.Minute
 
 func TestFakeClockAfter(t *testing.T) {
 	t.Parallel()
-	fc := &fakeClock{}
+	fc := &FakeClock{}
 
 	neg := fc.After(-1)
 	select {
@@ -128,7 +128,7 @@ func TestFakeClockSince(t *testing.T) {
 // https://github.com/jonboulle/clockwork/issues/35
 func TestTwoBlockersOneBlock(t *testing.T) {
 	t.Parallel()
-	fc := &fakeClock{}
+	fc := &FakeClock{}
 
 	ft1 := fc.NewTicker(time.Second)
 	ft2 := fc.NewTicker(time.Second)
@@ -141,7 +141,7 @@ func TestTwoBlockersOneBlock(t *testing.T) {
 
 func TestBlockUntilContext(t *testing.T) {
 	t.Parallel()
-	fc := &fakeClock{}
+	fc := &FakeClock{}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -163,13 +163,13 @@ func TestBlockUntilContext(t *testing.T) {
 			t.Errorf("BlockUntilContext returned %v, want context.Canceled.", err)
 		}
 	case <-ctx.Done():
-		t.Errorf("Never receved error on context cancellation.")
+		t.Errorf("Never received error on context cancellation.")
 	}
 }
 
 func TestAfterDeliveryInOrder(t *testing.T) {
 	t.Parallel()
-	fc := &fakeClock{}
+	fc := &FakeClock{}
 	for i := 0; i < 1000; i++ {
 		three := fc.After(3 * time.Second)
 		for j := 0; j < 100; j++ {
@@ -192,7 +192,7 @@ func TestAfterDeliveryInOrder(t *testing.T) {
 // There are no failure conditions when invoked without the -race flag.
 func TestFakeClockRace(t *testing.T) {
 	t.Parallel()
-	fc := &fakeClock{}
+	fc := &FakeClock{}
 	d := time.Second
 	go func() { fc.Advance(d) }()
 	go func() { fc.NewTicker(d) }()
