@@ -8,7 +8,7 @@ import (
 
 func TestFakeTickerStop(t *testing.T) {
 	t.Parallel()
-	fc := &fakeClock{}
+	fc := &FakeClock{}
 
 	ft := fc.NewTicker(1)
 	ft.Stop()
@@ -24,7 +24,7 @@ func TestFakeTickerTick(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	fc := &fakeClock{}
+	fc := &FakeClock{}
 	now := fc.Now()
 
 	// The tick at now.Add(2) should not get through since we advance time by

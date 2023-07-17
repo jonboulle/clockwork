@@ -8,7 +8,7 @@ import (
 
 func TestFakeClockTimerStop(t *testing.T) {
 	t.Parallel()
-	fc := &fakeClock{}
+	fc := &FakeClock{}
 
 	ft := fc.NewTimer(1)
 	ft.Stop()
@@ -24,7 +24,7 @@ func TestFakeClockTimers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	fc := &fakeClock{}
+	fc := &FakeClock{}
 
 	zero := fc.NewTimer(0)
 
