@@ -323,7 +323,7 @@ func (fc *FakeClock) setExpirer(e expirer, d time.Duration) {
 
 // firer is used by fakeTimer and fakeTicker used to help implement expirer.
 type firer struct {
-	// The channel associated with the firer, used to send expriation times.
+	// The channel associated with the firer, used to send expiration times.
 	c chan time.Time
 
 	// The time when the firer expires. Only meaningful if the firer is currently

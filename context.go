@@ -4,7 +4,7 @@ import (
 	"context"
 )
 
-// contextKey is private to this package so we can ensure uniqueness here. This
+// contextKey is private to this package, so we can ensure uniqueness here. This
 // type identifies context values provided by this package.
 type contextKey string
 
