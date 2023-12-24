@@ -1,6 +1,7 @@
 package clockwork
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -21,6 +22,7 @@ func assertState(t *testing.T, i, j int) {
 
 // TestMyFunc tests myFunc's behaviour with a FakeClock.
 func TestMyFunc(t *testing.T) {
+	ctx := context.Background()
 	var i int
 	c := NewFakeClock()
 
@@ -31,8 +33,12 @@ func TestMyFunc(t *testing.T) {
 		wg.Done()
 	}()
 
-	// Wait until myFunc is actually sleeping on the clock.
-	c.BlockUntil(1)
+	// Ensure we wait until myFunc is waiting on the clock.
+	// Use a context to avoid blocking forever if something
+	// goes wrong.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	c.BlockUntilContext(ctx, 1)
 
 	// Assert the initial state.
 	assertState(t, i, 0)
