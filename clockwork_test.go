@@ -124,6 +124,23 @@ func TestFakeClockSince(t *testing.T) {
 	}
 }
 
+func TestFakeClockUntil(t *testing.T) {
+	t.Parallel()
+	testTime := time.Now()
+	fc := NewFakeClockAt(testTime)
+
+	testOffset := time.Minute
+	probeTime := testTime.Add(testOffset)
+
+	elapsedTime := time.Second
+	fc.Advance(elapsedTime)
+
+	expectedDuration := testOffset - elapsedTime
+	if fc.Until(probeTime) != expectedDuration {
+		t.Fatalf("fakeClock.Until() returned unexpected duration, got: %d, want: %d", fc.Until(probeTime), expectedDuration)
+	}
+}
+
 // This used to result in a deadlock.
 // https://github.com/jonboulle/clockwork/issues/35
 func TestTwoBlockersOneBlock(t *testing.T) {
