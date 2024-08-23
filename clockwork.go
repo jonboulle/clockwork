@@ -19,6 +19,8 @@ type Clock interface {
 	NewTicker(d time.Duration) Ticker
 	NewTimer(d time.Duration) Timer
 	AfterFunc(d time.Duration, f func()) Timer
+	WithTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc)
+	WithDeadline(parent context.Context, deadline time.Time) (context.Context, context.CancelFunc)
 }
 
 // NewRealClock returns a Clock which simply delegates calls to the actual time
