@@ -31,7 +31,8 @@ func assertIsType(t *testing.T, expectedType, object interface{}) {
 func TestFakeClock_WithDeadline(t *testing.T) {
 	m := NewFakeClock()
 	now := m.Now()
-	ctx, _ := m.WithDeadline(context.Background(), now.Add(time.Second))
+	wrappedContext := WrapContext(context.Background(), m)
+	ctx, _ := wrappedContext.WithDeadline(wrappedContext, now.Add(time.Second))
 	m.Advance(time.Second)
 	select {
 	case <-ctx.Done():
@@ -46,8 +47,9 @@ func TestFakeClock_WithDeadline(t *testing.T) {
 // Ensure that WithDeadline does nothing when the deadline is later than the current deadline.
 func TestFakeClock_WithDeadlineLaterThanCurrent(t *testing.T) {
 	m := NewFakeClock()
-	ctx, _ := m.WithDeadline(context.Background(), m.Now().Add(time.Second))
-	ctx, _ = m.WithDeadline(ctx, m.Now().Add(10*time.Second))
+	wrappedContext := WrapContext(context.Background(), m)
+	ctx, _ := wrappedContext.WithDeadline(wrappedContext, m.Now().Add(time.Second))
+	ctx, _ = wrappedContext.WithDeadline(ctx, m.Now().Add(10*time.Second))
 	m.Advance(time.Second)
 	select {
 	case <-ctx.Done():
@@ -62,7 +64,8 @@ func TestFakeClock_WithDeadlineLaterThanCurrent(t *testing.T) {
 // Ensure that WithDeadline cancel closes Done channel with context.Canceled error.
 func TestFakeClock_WithDeadlineCancel(t *testing.T) {
 	m := NewFakeClock()
-	ctx, cancel := m.WithDeadline(context.Background(), m.Now().Add(time.Second))
+	wrappedContext := WrapContext(context.Background(), m)
+	ctx, cancel := wrappedContext.WithDeadline(context.Background(), m.Now().Add(time.Second))
 	cancel()
 	select {
 	case <-ctx.Done():
@@ -78,7 +81,8 @@ func TestFakeClock_WithDeadlineCancel(t *testing.T) {
 func TestFakeClock_WithDeadlineCancelledWithParent(t *testing.T) {
 	m := NewFakeClock()
 	parent, cancel := context.WithCancel(context.Background())
-	ctx, _ := m.WithDeadline(parent, m.Now().Add(time.Second))
+	wrappedContext := WrapContext(parent, m)
+	ctx, _ := wrappedContext.WithDeadline(parent, m.Now().Add(time.Second))
 	cancel()
 	select {
 	case <-ctx.Done():
@@ -93,7 +97,8 @@ func TestFakeClock_WithDeadlineCancelledWithParent(t *testing.T) {
 // Ensure that WithDeadline cancelled immediately when deadline has already passed.
 func TestFakeClock_WithDeadlineImmediate(t *testing.T) {
 	m := NewFakeClock()
-	ctx, _ := m.WithDeadline(context.Background(), m.Now().Add(-time.Second))
+	wrappedContext := WrapContext(context.Background(), m)
+	ctx, _ := wrappedContext.WithDeadline(context.Background(), m.Now().Add(-time.Second))
 	select {
 	case <-ctx.Done():
 		if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -107,7 +112,8 @@ func TestFakeClock_WithDeadlineImmediate(t *testing.T) {
 // Ensure that WithTimeout is cancelled when deadline exceeded.
 func TestFakeClock_WithTimeout(t *testing.T) {
 	m := NewFakeClock()
-	ctx, _ := m.WithTimeout(context.Background(), time.Second)
+	wrappedContext := WrapContext(context.Background(), m)
+	ctx, _ := wrappedContext.WithTimeout(context.Background(), time.Second)
 	m.Advance(time.Second)
 	select {
 	case <-ctx.Done():

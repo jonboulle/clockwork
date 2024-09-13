@@ -32,38 +32,47 @@ func FromContext(ctx context.Context) Clock {
 	return NewRealClock()
 }
 
-func (rc *realClock) WithTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(parent, timeout)
+// ClockedContext is a interface that extends the context.Context interface with
+// methods for creating new contexts with timeouts and deadlines with a controlled clock.
+type ClockedContext interface {
+	context.Context
+	WithTimeout(parent context.Context, timeout time.Duration) (ClockedContext, context.CancelFunc)
+	WithDeadline(parent context.Context, deadline time.Time) (ClockedContext, context.CancelFunc)
 }
 
-func (rc *realClock) WithDeadline(parent context.Context, deadline time.Time) (context.Context, context.CancelFunc) {
-	return context.WithDeadline(parent, deadline)
+// WrapContext creates a new context that uses the provided clock for timeouts and deadlines.
+func WrapContext(parent context.Context, clock Clock) ClockedContext {
+	ctx := &timerCtx{
+		clock:  clock,
+		parent: parent,
+		done:   make(chan struct{}),
+	}
+	propagateCancel(parent, ctx)
+	return ctx
 }
 
-func (fc *FakeClock) WithTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
-	return fc.WithDeadline(parent, fc.Now().Add(timeout))
+func (c *timerCtx) WithTimeout(parent context.Context, timeout time.Duration) (ClockedContext, context.CancelFunc) {
+	return c.WithDeadline(parent, c.clock.Now().Add(timeout))
 }
 
-func (fc *FakeClock) WithDeadline(parent context.Context, deadline time.Time) (context.Context, context.CancelFunc) {
+func (c *timerCtx) WithDeadline(parent context.Context, deadline time.Time) (ClockedContext, context.CancelFunc) {
 	if cur, ok := parent.Deadline(); ok && cur.Before(deadline) {
 		// The current deadline is already sooner than the new one.
-		return context.WithCancel(parent)
+		return c, func() { c.cancel(parent.Err()) }
 	}
-	ctx := &timerCtx{clock: fc, parent: parent, deadline: deadline, done: make(chan struct{})}
-	propagateCancel(parent, ctx)
-	dur := deadline.Sub(fc.Now())
+	dur := deadline.Sub(c.clock.Now())
 	if dur <= 0 {
-		ctx.cancel(context.DeadlineExceeded) // deadline has already passed
-		return ctx, func() {}
+		c.cancel(context.DeadlineExceeded) // deadline has already passed
+		return c, func() {}
 	}
-	ctx.Lock()
-	defer ctx.Unlock()
-	if ctx.err == nil {
-		ctx.timer = fc.AfterFunc(dur, func() {
-			ctx.cancel(context.DeadlineExceeded)
+	c.Lock()
+	defer c.Unlock()
+	if c.err == nil {
+		c.timer = c.clock.AfterFunc(dur, func() {
+			c.cancel(context.DeadlineExceeded)
 		})
 	}
-	return ctx, func() { ctx.cancel(context.Canceled) }
+	return c, func() { c.cancel(context.Canceled) }
 }
 
 // propagateCancel arranges for child to be canceled when parent is.
@@ -106,7 +115,7 @@ func (c *timerCtx) cancel(err error) {
 	}
 }
 
-func (c *timerCtx) Deadline() (deadline time.Time, ok bool) { return c.deadline, true }
+func (c *timerCtx) Deadline() (deadline time.Time, ok bool) { return c.deadline, !c.deadline.IsZero() }
 
 func (c *timerCtx) Done() <-chan struct{} { return c.done }
 
