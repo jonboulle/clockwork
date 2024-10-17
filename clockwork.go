@@ -4,7 +4,7 @@ package clockwork
 import (
 	"context"
 	"errors"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 )
@@ -231,11 +231,7 @@ func (fc *FakeClock) Advance(d time.Duration) {
 //
 // Deprecated: New code should prefer BlockUntilContext.
 func (fc *FakeClock) BlockUntil(n int) {
-	b := fc.newBlocker(n)
-	if b == nil {
-		return
-	}
-	<-b.ch
+	fc.BlockUntilContext(context.TODO(), n)
 }
 
 // BlockUntilContext blocks until the fakeClock has the given number of waiters
@@ -281,16 +277,16 @@ func (fc *FakeClock) stop(e expirer) bool {
 //
 // The caller must hold fc.l.
 func (fc *FakeClock) stopExpirer(e expirer) bool {
-	for i, t := range fc.waiters {
-		if t == e {
-			// Remove element, maintaining order.
-			copy(fc.waiters[i:], fc.waiters[i+1:])
-			fc.waiters[len(fc.waiters)-1] = nil
-			fc.waiters = fc.waiters[:len(fc.waiters)-1]
-			return true
-		}
+	idx := slices.Index(fc.waiters, e)
+	if idx == -1 {
+		return false
 	}
-	return false
+	// Remove element, maintaining order, setting inaccessible elements to nil so
+	// they can be garbage collected.
+	copy(fc.waiters[idx:], fc.waiters[idx+1:])
+	fc.waiters[len(fc.waiters)-1] = nil
+	fc.waiters = fc.waiters[:len(fc.waiters)-1]
+	return true
 }
 
 // set sets an expirer to expire at a future point in time.
@@ -315,8 +311,8 @@ func (fc *FakeClock) setExpirer(e expirer, d time.Duration) {
 	// Add the expirer to the set of waiters and notify any blockers.
 	e.setExpiry(fc.time.Add(d))
 	fc.waiters = append(fc.waiters, e)
-	sort.Slice(fc.waiters, func(i int, j int) bool {
-		return fc.waiters[i].expiry().Before(fc.waiters[j].expiry())
+	slices.SortFunc(fc.waiters, func(a, b expirer) int {
+		return a.expiry().Compare(b.expiry())
 	})
 
 	// Notify blockers of our new waiter.
