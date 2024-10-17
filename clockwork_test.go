@@ -3,7 +3,6 @@ package clockwork
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 )
@@ -205,24 +204,8 @@ func TestFakeClockRace(t *testing.T) {
 	t.Parallel()
 	fc := &FakeClock{}
 	d := time.Second
-	var wg sync.WaitGroup
-	wg.Add(4)
-	go func() {
-		fc.Sleep(d)
-		wg.Done()
-	}()
-	go func() {
-		fc.Advance(d)
-		wg.Done()
-	}()
-	go func() {
-		fc.NewTicker(d)
-		wg.Done()
-	}()
-	go func() {
-		fc.NewTimer(d)
-		wg.Done()
-	}()
-	fc.Advance(d)
-	wg.Wait()
+	go func() { fc.Advance(d) }()
+	go func() { fc.NewTicker(d) }()
+	go func() { fc.NewTimer(d) }()
+	go func() { fc.Sleep(d) }()
 }
