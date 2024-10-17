@@ -18,7 +18,7 @@ func TestAfter(t *testing.T) {
 	fc := &FakeClock{}
 
 	var timers []<-chan time.Time
-	for i := 0; i <=3; i++ {
+	for i := 0; i < 3; i++ {
 		timers = append(timers, fc.After(time.Duration(i*2+1))) // 1, 3, 5
 	}
 
@@ -59,7 +59,8 @@ func TestAfter(t *testing.T) {
 	// Add 1 more timer at time 5. Should fire at the same time as our timer in chs[2]
 	timers = append(timers, fc.After(time.Duration(3))) // Current time + 3 = 2 + 3 = 5
 
-	fc.Advance(2) // Skip over timer at time 3, advancing directly yo 4. Check it works as expected.
+	// Skip over timer at time 3, advancing directly to 4. Check it works as expected.
+	fc.Advance(2)
 	select {
 	case <-timers[1]:
 	default:
@@ -74,11 +75,11 @@ func TestAfter(t *testing.T) {
 	}
 
 	fc.Advance(1)
-	for _, i := range []int{2, 3} {
+	for idx, tIdex := range []int{2, 3} {
 		select {
-		case <-timers[i]:
+		case <-timers[tIdex]:
 		default:
-			t.Errorf("Timer at time=5 did not fire at time=5")
+			t.Errorf("Timer at time=5 #%v did not fire at time=5", idx)
 		}
 	}
 }
