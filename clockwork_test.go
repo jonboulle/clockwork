@@ -18,7 +18,7 @@ func TestAfter(t *testing.T) {
 	fc := &FakeClock{}
 
 	var timers []<-chan time.Time
-	for i := range 3 {
+	for i := 0; i <=3; i++ {
 		timers = append(timers, fc.After(time.Duration(i*2+1))) // 1, 3, 5
 	}
 
@@ -92,7 +92,7 @@ func TestAfterZero(t *testing.T) {
 	}{
 		{name: "zero"},
 		{
-			name: "negatie",
+			name: "negative",
 			d:    -time.Second,
 		},
 	}
@@ -106,7 +106,7 @@ func TestAfterZero(t *testing.T) {
 			select {
 			case <-fc.After(tc.d):
 			case <-ctx.Done():
-				t.Errorf("negative did not return!")
+				t.Errorf("FakeClock.After() did not return.")
 			}
 		})
 	}
