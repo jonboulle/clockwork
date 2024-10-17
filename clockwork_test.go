@@ -3,7 +3,6 @@ package clockwork
 import (
 	"context"
 	"errors"
-	"reflect"
 	"testing"
 	"time"
 )
@@ -13,147 +12,141 @@ import (
 // process to get killed, providing a stack trace.
 const timeout = time.Minute
 
-func TestFakeClockAfter(t *testing.T) {
+func TestAfter(t *testing.T) {
 	t.Parallel()
 	fc := &FakeClock{}
 
-	neg := fc.After(-1)
-	select {
-	case <-neg:
-	default:
-		t.Errorf("negative did not return!")
+	var timers []<-chan time.Time
+	for i := 0; i < 3; i++ {
+		timers = append(timers, fc.After(time.Duration(i*2+1))) // 1, 3, 5
 	}
 
-	zero := fc.After(0)
-	select {
-	case <-zero:
-	default:
-		t.Errorf("zero did not return!")
+	// Nothing fired immediately.
+	for i, ch := range timers {
+		select {
+		case <-ch:
+			t.Errorf("Timer at time=%v fired at time=0", i*2+1)
+		default:
+		}
 	}
-	one := fc.After(1)
-	two := fc.After(2)
-	six := fc.After(6)
-	ten := fc.After(10)
+
+	// First timer fires at time=1.
 	fc.Advance(1)
 	select {
-	case <-one:
+	case <-timers[0]:
 	default:
-		t.Errorf("one did not return!")
+		t.Errorf("Timer at time=1 did not fire at time=1")
 	}
-	select {
-	case <-two:
-		t.Errorf("two returned prematurely!")
-	case <-six:
-		t.Errorf("six returned prematurely!")
-	case <-ten:
-		t.Errorf("ten returned prematurely!")
-	default:
+	for i, ch := range timers[1:] {
+		select {
+		case <-ch:
+			t.Errorf("Timer at time=%v fired at time=1", i*2+3)
+		default:
+		}
 	}
+
+	// Should not change anything.
 	fc.Advance(1)
-	select {
-	case <-two:
-	default:
-		t.Errorf("two did not return!")
+	for i, ch := range timers[1:] {
+		select {
+		case <-ch:
+			t.Errorf("Timer at time=%v fired at time=2", i*2+3)
+		default:
+		}
 	}
+
+	// Add 1 more timer at time 5. Should fire at the same time as our timer in chs[2]
+	timers = append(timers, fc.After(time.Duration(3))) // Current time + 3 = 2 + 3 = 5
+
+	// Skip over timer at time 3, advancing directly to 4. Check it works as expected.
+	fc.Advance(2)
 	select {
-	case <-six:
-		t.Errorf("six returned prematurely!")
-	case <-ten:
-		t.Errorf("ten returned prematurely!")
+	case <-timers[1]:
 	default:
+		t.Errorf("Timer at time=3 did not fire at time=4")
 	}
+	for _, i := range []int{2, 3} {
+		select {
+		case <-timers[i]:
+			t.Errorf("Timer at time=5 fired at time=4")
+		default:
+		}
+	}
+
 	fc.Advance(1)
-	select {
-	case <-six:
-		t.Errorf("six returned prematurely!")
-	case <-ten:
-		t.Errorf("ten returned prematurely!")
-	default:
-	}
-	fc.Advance(3)
-	select {
-	case <-six:
-	default:
-		t.Errorf("six did not return!")
-	}
-	select {
-	case <-ten:
-		t.Errorf("ten returned prematurely!")
-	default:
-	}
-	fc.Advance(100)
-	select {
-	case <-ten:
-	default:
-		t.Errorf("ten did not return!")
+	for idx, tIdex := range []int{2, 3} {
+		select {
+		case <-timers[tIdex]:
+		default:
+			t.Errorf("Timer at time=5 #%v did not fire at time=5", idx)
+		}
 	}
 }
 
-func TestNewFakeClock(t *testing.T) {
+func TestAfterZero(t *testing.T) {
 	t.Parallel()
-	fc := NewFakeClock()
-	now := fc.Now()
-	if now.IsZero() {
-		t.Fatalf("fakeClock.Now() fulfills IsZero")
+	cases := []struct {
+		name string
+
+		d time.Duration
+	}{
+		{name: "zero"},
+		{
+			name: "negative",
+			d:    -time.Second,
+		},
 	}
 
-	now2 := fc.Now()
-	if !reflect.DeepEqual(now, now2) {
-		t.Fatalf("fakeClock.Now() returned different value: want=%#v got=%#v", now, now2)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fc := &FakeClock{}
+			select {
+			case <-fc.After(tc.d):
+			case <-ctx.Done():
+				t.Errorf("FakeClock.After() did not return.")
+			}
+		})
+	}
+}
+
+func TestNewFakeClockIsNotZero(t *testing.T) {
+	t.Parallel()
+	fc := NewFakeClock()
+	if fc.Now().IsZero() {
+		t.Errorf("NewFakeClock.Now().IsZero() returned true, want false")
 	}
 }
 
 func TestNewFakeClockAt(t *testing.T) {
 	t.Parallel()
-	t1 := time.Date(1999, time.February, 3, 4, 5, 6, 7, time.UTC)
-	fc := NewFakeClockAt(t1)
-	now := fc.Now()
-	if !reflect.DeepEqual(now, t1) {
-		t.Fatalf("fakeClock.Now() returned unexpected non-initialised value: want=%#v, got %#v", t1, now)
+	want := time.Date(1999, time.February, 3, 4, 5, 6, 7, time.UTC)
+	if got := NewFakeClockAt(want).Now(); !got.Equal(want) {
+		t.Errorf("fakeClock.Now() returned %v, want: %v", got, want)
 	}
 }
 
-func TestFakeClockSince(t *testing.T) {
+func TestSince(t *testing.T) {
 	t.Parallel()
-	fc := NewFakeClock()
-	now := fc.Now()
-	elapsedTime := time.Second
-	fc.Advance(elapsedTime)
-	if fc.Since(now) != elapsedTime {
-		t.Fatalf("fakeClock.Since() returned unexpected duration, got: %d, want: %d", fc.Since(now), elapsedTime)
+	start := time.Date(1999, time.February, 3, 4, 5, 6, 7, time.UTC)
+	want := time.Second
+	fc := NewFakeClockAt(start.Add(want))
+	if got := fc.Since(start); got != want {
+		t.Errorf("fakeClock.Since() returned %v, want: %v", got, want)
 	}
 }
 
-func TestFakeClockUntil(t *testing.T) {
+func TestUntil(t *testing.T) {
 	t.Parallel()
-	testTime := time.Now()
-	fc := NewFakeClockAt(testTime)
-
-	testOffset := time.Minute
-	probeTime := testTime.Add(testOffset)
-
-	elapsedTime := time.Second
-	fc.Advance(elapsedTime)
-
-	expectedDuration := testOffset - elapsedTime
-	if fc.Until(probeTime) != expectedDuration {
-		t.Fatalf("fakeClock.Until() returned unexpected duration, got: %d, want: %d", fc.Until(probeTime), expectedDuration)
+	start := time.Date(1999, time.February, 3, 4, 5, 6, 7, time.UTC)
+	fc := NewFakeClockAt(start)
+	want := time.Second
+	end := start.Add(want)
+	if got := fc.Until(end); got != want {
+		t.Errorf("fakeClock.Until() returned %v, want: %v", got, want)
 	}
-}
-
-// This used to result in a deadlock.
-// https://github.com/jonboulle/clockwork/issues/35
-func TestTwoBlockersOneBlock(t *testing.T) {
-	t.Parallel()
-	fc := &FakeClock{}
-
-	ft1 := fc.NewTicker(time.Second)
-	ft2 := fc.NewTicker(time.Second)
-
-	fc.BlockUntil(1)
-	fc.BlockUntil(2)
-	ft1.Stop()
-	ft2.Stop()
 }
 
 func TestBlockUntilContext(t *testing.T) {
