@@ -30,6 +30,25 @@ type fakeTimer struct {
 	afterFunc func()
 }
 
+func newFakeTimer(fc *FakeClock, afterfunc func()) *fakeTimer {
+	var ft *fakeTimer
+	ft = &fakeTimer{
+		firer: newFirer(),
+		reset: func(d time.Duration) bool {
+			fc.l.Lock()
+			defer fc.l.Unlock()
+			// fc.l must be held across the calls to stopExpirer & setExpirer.
+			stopped := fc.stopExpirer(ft)
+			fc.setExpirer(ft, d)
+			return stopped
+		},
+		stop: func() bool { return fc.stop(ft) },
+
+		afterFunc: afterfunc,
+	}
+	return ft
+}
+
 func (f *fakeTimer) Reset(d time.Duration) bool {
 	return f.reset(d)
 }

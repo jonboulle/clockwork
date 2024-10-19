@@ -119,6 +119,14 @@ func (fc *FakeClock) After(d time.Duration) <-chan time.Time {
 	return fc.NewTimer(d).Chan()
 }
 
+// afterTime is like After, but uses a time instead of a duration.
+//
+// It is used to ensure FakeClock's lock is held constant through calling
+// fc.After(t.Sub(fc.Now())). It should not be exposed externally.
+func (fc *FakeClock) afterTime(t time.Time) <-chan time.Time {
+	return fc.newTimerAtTime(t, nil).Chan()
+}
+
 // Sleep blocks until the given duration has passed on the fakeClock.
 func (fc *FakeClock) Sleep(d time.Duration) {
 	<-fc.After(d)
@@ -179,22 +187,17 @@ func (fc *FakeClock) AfterFunc(d time.Duration, f func()) Timer {
 
 // newTimer returns a new timer, using an optional afterFunc.
 func (fc *FakeClock) newTimer(d time.Duration, afterfunc func()) *fakeTimer {
-	var ft *fakeTimer
-	ft = &fakeTimer{
-		firer: newFirer(),
-		reset: func(d time.Duration) bool {
-			fc.l.Lock()
-			defer fc.l.Unlock()
-			// fc.l must be held across the calls to stopExpirer & setExpirer.
-			stopped := fc.stopExpirer(ft)
-			fc.setExpirer(ft, d)
-			return stopped
-		},
-		stop: func() bool { return fc.stop(ft) },
-
-		afterFunc: afterfunc,
-	}
+	ft := newFakeTimer(fc, afterfunc)
 	fc.set(ft, d)
+	return ft
+}
+
+// newTimerAtTime is like newTimer, but uses a time instead of a duration.
+func (fc *FakeClock) newTimerAtTime(t time.Time, afterfunc func()) *fakeTimer {
+	ft := newFakeTimer(fc, afterfunc)
+	fc.l.Lock()
+	defer fc.l.Unlock()
+	fc.setExpirer(ft, t.Sub(fc.time))
 	return ft
 }
 
@@ -289,7 +292,7 @@ func (fc *FakeClock) stopExpirer(e expirer) bool {
 	return true
 }
 
-// set sets an expirer to expire at a future point in time.
+// set sets an expirer to expire after a duration.
 func (fc *FakeClock) set(e expirer, d time.Duration) {
 	fc.l.Lock()
 	defer fc.l.Unlock()
