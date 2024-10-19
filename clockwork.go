@@ -192,7 +192,7 @@ func (fc *FakeClock) newTimer(d time.Duration, afterfunc func()) (*fakeTimer, ti
 	fc.l.Lock()
 	defer fc.l.Unlock()
 	fc.setExpirer(ft, d)
-	return ft, fc.time.Add(d)
+	return ft, ft.expiry()
 }
 
 // newTimerAtTime is like newTimer, but uses a time instead of a duration.

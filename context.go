@@ -61,29 +61,36 @@ func WithTimeout(parent context.Context, clock *FakeClock, d time.Duration) (con
 // It ignores parent cancellation if the parent is cancelled with
 // context.DeadlineExceeded.
 type fakeClockContext struct {
-	parent context.Context
+	parent   context.Context
+	deadline time.Time // The user-facing deadline based on the fake clock's time.
 
-	// The done channel used to track the context status based on the fake clock.
+	// Tracks timeout/deadline cancellation.
 	timerDone <-chan time.Time
 
-	deadline time.Time // The deadline, based on the fake clock's time.
-	cancel   func()
+	// Tracks manual calls to the cancel function.
+	cancel       func() // Closes cancelCalled wrapped in a sync.Once.
+	cancelCalled chan struct{}
 
-	mu      sync.Mutex
-	ctxDone chan struct{} // Returned by Done() per context.Context interface.
-	err     error
+	// The user-facing data from the context.Context interface.
+	ctxDone chan struct{} // Returned by Done().
+	err     error         // nil until ctxDone is ready to be closed.
 }
 
-func newFakeClockContext(parent context.Context, deadline time.Time, done <-chan time.Time) (context.Context, context.CancelFunc) {
-	ctxDone := make(chan struct{})
+func newFakeClockContext(parent context.Context, deadline time.Time, timer <-chan time.Time) (context.Context, context.CancelFunc) {
+	cancelCalled := make(chan struct{})
 	ctx := &fakeClockContext{
-		parent:    parent,
-		deadline:  deadline,
-		timerDone: done,
-		ctxDone:   ctxDone,
-		cancel:    sync.OnceFunc(func() { close(ctxDone) }),
+		parent:       parent,
+		deadline:     deadline,
+		timerDone:    timer,
+		cancelCalled: cancelCalled,
+		ctxDone:      make(chan struct{}),
+		cancel: sync.OnceFunc(func() {
+			close(cancelCalled)
+		}),
 	}
-	go ctx.runCancel()
+	ready := make(chan struct{}, 1)
+	go ctx.runCancel(ready)
+	<-ready // Cancellation goroutine is running.
 	return ctx, ctx.cancel
 }
 
@@ -96,8 +103,7 @@ func (c *fakeClockContext) Done() <-chan struct{} {
 }
 
 func (c *fakeClockContext) Err() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	<-c.Done() // Don't return the error before it is ready.
 	return c.err
 }
 
@@ -114,34 +120,42 @@ func (c *fakeClockContext) Value(key any) any {
 //   - The returned CancelFunc is executed.
 //   - The fakeClockContext's parent context is cancelled with an error other
 //     than context.DeadlineExceeded.
-func (c *fakeClockContext) runCancel() {
-	select {
-	case <-c.timerDone:
-		c.setError(context.DeadlineExceeded)
-		return
-	case <-c.ctxDone:
-		c.setError(context.Canceled)
-		return
-	case <-c.parent.Done():
-		if err := c.parent.Err(); !errors.Is(err, context.DeadlineExceeded) {
-			c.setError(err)
-			return
+func (c *fakeClockContext) runCancel(ready chan struct{}) {
+	parentDone := c.parent.Done()
+
+	// Close ready when done, just in case the ready signal races with other
+	// branches of our select statement below.
+	defer close(ready)
+
+	var ctxErr error
+	for ctxErr == nil {
+		select {
+		case <-c.timerDone:
+			ctxErr = context.DeadlineExceeded
+
+		case <-c.cancelCalled:
+			ctxErr = context.Canceled
+
+		case <-parentDone:
+			parentDone = nil // This case statement can only fire once.
+
+			if err := c.parent.Err(); !errors.Is(err, context.DeadlineExceeded) {
+				// The parent context was canceled with some error otehr than deadline
+				// exceeded, so we respect it.
+				ctxErr = err
+			}
+		case ready <- struct{}{}:
+			// Signals the cancellation goroutine has begun, in an attempt to minimize
+			// race conditions related to goroutine startup time.
+			ready = nil // This case statement can only fire once.
 		}
 	}
 
-	// The parent context has hit its deadline, but because we are using a fake
-	// clock we ignore it.
-	select {
-	case <-c.timerDone:
-		c.setError(context.DeadlineExceeded)
-	case <-c.ctxDone:
-		c.setError(context.Canceled)
-	}
+	c.setError(ctxErr)
+	return
 }
 
 func (c *fakeClockContext) setError(err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.err = err
-	c.cancel()
+	close(c.ctxDone)
 }
