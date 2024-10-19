@@ -140,7 +140,7 @@ func (c *fakeClockContext) runCancel(ready chan struct{}) {
 			parentDone = nil // This case statement can only fire once.
 
 			if err := c.parent.Err(); !errors.Is(err, context.DeadlineExceeded) {
-				// The parent context was canceled with some error otehr than deadline
+				// The parent context was canceled with some error other than deadline
 				// exceeded, so we respect it.
 				ctxErr = err
 			}

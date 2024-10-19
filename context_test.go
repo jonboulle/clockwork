@@ -156,7 +156,7 @@ func TestWithTimeoutDone(t *testing.T) {
 			want: context.Canceled,
 		},
 		{
-			name:    "advancing past deadline cancels child",
+			name:    "advancing past timeout cancels child",
 			start:   time.Unix(10, 0),
 			timeout: 10 * time.Second,
 			action: func(_, _ context.CancelFunc, clock *FakeClock) {
