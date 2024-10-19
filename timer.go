@@ -1,6 +1,8 @@
 package clockwork
 
-import "time"
+import (
+	"time"
+)
 
 // Timer provides an interface which can be used instead of directly using
 // [time.Timer]. The real-time timer t provides events through t.C which becomes
@@ -40,6 +42,7 @@ func (f *fakeTimer) Stop() bool {
 
 func (f *fakeTimer) expire(now time.Time) *time.Duration {
 	if f.afterFunc != nil {
+		defer gosched()
 		go f.afterFunc()
 		return nil
 	}
@@ -51,3 +54,6 @@ func (f *fakeTimer) expire(now time.Time) *time.Duration {
 	}
 	return nil
 }
+
+// Sleep momentarily so that other goroutines can process.
+func gosched() { time.Sleep(time.Millisecond) }
