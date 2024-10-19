@@ -157,44 +157,53 @@ func (fc *FakeClock) NewTicker(d time.Duration) Ticker {
 	ft = &fakeTicker{
 		firer: newFirer(),
 		d:     d,
-		reset: func(d time.Duration) { fc.set(ft, d) },
-		stop:  func() { fc.stop(ft) },
+		reset: func(d time.Duration) {
+			fc.l.Lock()
+			defer fc.l.Unlock()
+			fc.setExpirer(ft, d)
+		},
+		stop: func() { fc.stop(ft) },
 	}
-	fc.set(ft, d)
+	fc.l.Lock()
+	defer fc.l.Unlock()
+	fc.setExpirer(ft, d)
 	return ft
 }
 
 // NewTimer returns a Timer that will fire only after calls to
 // fakeClock.Advance() have moved the clock past the given duration.
 func (fc *FakeClock) NewTimer(d time.Duration) Timer {
-	return fc.newTimer(d, nil)
+	t, _ := fc.newTimer(d, nil)
+	return t
 }
 
 // AfterFunc mimics [time.AfterFunc]; it returns a Timer that will invoke the
 // given function only after calls to fakeClock.Advance() have moved the clock
 // past the given duration.
 func (fc *FakeClock) AfterFunc(d time.Duration, f func()) Timer {
-	return fc.newTimer(d, f)
+	t, _ := fc.newTimer(d, f)
+	return t
 }
 
-// newTimer returns a new timer, using an optional afterFunc.
-func (fc *FakeClock) newTimer(d time.Duration, afterfunc func()) *fakeTimer {
-	var ft *fakeTimer
-	ft = &fakeTimer{
-		firer: newFirer(),
-		reset: func(d time.Duration) bool {
-			fc.l.Lock()
-			defer fc.l.Unlock()
-			// fc.l must be held across the calls to stopExpirer & setExpirer.
-			stopped := fc.stopExpirer(ft)
-			fc.setExpirer(ft, d)
-			return stopped
-		},
-		stop: func() bool { return fc.stop(ft) },
+// newTimer returns a new timer using an optional afterFunc and the time that
+// timer expires.
+func (fc *FakeClock) newTimer(d time.Duration, afterfunc func()) (*fakeTimer, time.Time) {
+	ft := newFakeTimer(fc, afterfunc)
+	fc.l.Lock()
+	defer fc.l.Unlock()
+	fc.setExpirer(ft, d)
+	return ft, ft.expiry()
+}
 
-		afterFunc: afterfunc,
-	}
-	fc.set(ft, d)
+// newTimerAtTime is like newTimer, but uses a time instead of a duration.
+//
+// It is used to ensure FakeClock's lock is held constant through calling
+// fc.After(t.Sub(fc.Now())). It should not be exposed externally.
+func (fc *FakeClock) newTimerAtTime(t time.Time, afterfunc func()) *fakeTimer {
+	ft := newFakeTimer(fc, afterfunc)
+	fc.l.Lock()
+	defer fc.l.Unlock()
+	fc.setExpirer(ft, t.Sub(fc.time))
 	return ft
 }
 
@@ -289,13 +298,6 @@ func (fc *FakeClock) stopExpirer(e expirer) bool {
 	return true
 }
 
-// set sets an expirer to expire at a future point in time.
-func (fc *FakeClock) set(e expirer, d time.Duration) {
-	fc.l.Lock()
-	defer fc.l.Unlock()
-	fc.setExpirer(e, d)
-}
-
 // setExpirer sets an expirer to expire at a future point in time.
 //
 // The caller must hold fc.l.
@@ -316,16 +318,14 @@ func (fc *FakeClock) setExpirer(e expirer, d time.Duration) {
 	})
 
 	// Notify blockers of our new waiter.
-	var blocked []*blocker
 	count := len(fc.waiters)
-	for _, b := range fc.blockers {
+	fc.blockers = slices.DeleteFunc(fc.blockers, func(b *blocker) bool {
 		if b.count <= count {
 			close(b.ch)
-			continue
+			return true
 		}
-		blocked = append(blocked, b)
-	}
-	fc.blockers = blocked
+		return false
+	})
 }
 
 // firer is used by fakeTimer and fakeTicker used to help implement expirer.
