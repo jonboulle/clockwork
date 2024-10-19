@@ -34,17 +34,6 @@ func FromContext(ctx context.Context) Clock {
 	return NewRealClock()
 }
 
-type fakeClockContext struct {
-	parent context.Context
-	clock  *FakeClock
-
-	deadline time.Time
-
-	mu   sync.Mutex
-	done chan struct{}
-	err  error
-}
-
 // WithDeadline returns a context with a deadline based on a [FakeClock].
 //
 // The returned context ignores parent cancelation if the parent was cancelled
@@ -55,37 +44,55 @@ type fakeClockContext struct {
 // way to then cancel the returned context is by calling the returned
 // context.CancelFunc.
 func WithDeadline(parent context.Context, clock *FakeClock, t time.Time) (context.Context, context.CancelFunc) {
-	ctx := &fakeClockContext{
-		parent: parent,
-	}
-	cancelOnce := ctx.runCancel(clock.afterTime(t))
-	return &fakeClockContext{}, cancelOnce
+	return newFakeClockContext(parent, t, clock.newTimerAtTime(t, nil).Chan())
 }
 
 // WithTimeout returns a context with a timeout based on a [FakeClock].
 //
 // The returned context follows the same behaviors as [WithDeadline].
 func WithTimeout(parent context.Context, clock *FakeClock, d time.Duration) (context.Context, context.CancelFunc) {
-	ctx := &fakeClockContext{
-		parent: parent,
-	}
-	cancelOnce := ctx.runCancel(clock.After(d))
-	return &fakeClockContext{}, cancelOnce
+	t, deadline := clock.newTimer(d, nil)
+	return newFakeClockContext(parent, deadline, t.Chan())
 }
 
-func (c *fakeClockContext) setError(err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.err = err
-	close(c.done)
+// fakeClockContext implements context.Context, using a fake clock for its
+// deadline.
+//
+// It ignores parent cancellation if the parent is cancelled with
+// context.DeadlineExceeded.
+type fakeClockContext struct {
+	parent context.Context
+
+	// The done channel used to track the context status based on the fake clock.
+	timerDone <-chan time.Time
+
+	deadline time.Time // The deadline, based on the fake clock's time.
+	cancel   func()
+
+	mu      sync.Mutex
+	ctxDone chan struct{} // Returned by Done() per context.Context interface.
+	err     error
+}
+
+func newFakeClockContext(parent context.Context, deadline time.Time, done <-chan time.Time) (context.Context, context.CancelFunc) {
+	ctxDone := make(chan struct{})
+	ctx := &fakeClockContext{
+		parent:    parent,
+		deadline:  deadline,
+		timerDone: done,
+		ctxDone:   ctxDone,
+		cancel:    sync.OnceFunc(func() { close(ctxDone) }),
+	}
+	go ctx.runCancel()
+	return ctx, ctx.cancel
 }
 
 func (c *fakeClockContext) Deadline() (time.Time, bool) {
-	return time.Time{}, false
+	return c.deadline, true
 }
 
 func (c *fakeClockContext) Done() <-chan struct{} {
-	return c.done
+	return c.ctxDone
 }
 
 func (c *fakeClockContext) Err() error {
@@ -98,36 +105,43 @@ func (c *fakeClockContext) Value(key any) any {
 	return c.parent.Value(key)
 }
 
-func (c *fakeClockContext) runCancel(clockExpCh <-chan time.Time) context.CancelFunc {
-	cancelCh := make(chan struct{})
-	result := sync.OnceFunc(func() {
-		close(cancelCh)
-	})
-
-	go func() {
-		select {
-		case <-clockExpCh:
-			c.setError(context.DeadlineExceeded)
+// runCancel runs the fakeClockContext's cancel goroutine and returns the
+// fakeClockContext's cancel function.
+//
+// fakeClockContext is then cancelled when any of the following occur:
+//
+//   - The fakeClockContext.done channel is closed by its timer.
+//   - The returned CancelFunc is executed.
+//   - The fakeClockContext's parent context is cancelled with an error other
+//     than context.DeadlineExceeded.
+func (c *fakeClockContext) runCancel() {
+	select {
+	case <-c.timerDone:
+		c.setError(context.DeadlineExceeded)
+		return
+	case <-c.ctxDone:
+		c.setError(context.Canceled)
+		return
+	case <-c.parent.Done():
+		if err := c.parent.Err(); !errors.Is(err, context.DeadlineExceeded) {
+			c.setError(err)
 			return
-		case <-cancelCh:
-			c.setError(context.DeadlineExceeded)
-			return
-		case <-c.parent.Done():
-			if err := c.parent.Err(); !errors.Is(err, context.DeadlineExceeded) {
-				c.setError(err)
-				return
-			}
 		}
+	}
 
-		// The parent context has hit its deadline, but because we are using a fake
-		// clock we ignore it.
-		select {
-		case <-clockExpCh:
-			c.setError(context.DeadlineExceeded)
-		case <-cancelCh:
-			c.setError(context.DeadlineExceeded)
-		}
-	}()
+	// The parent context has hit its deadline, but because we are using a fake
+	// clock we ignore it.
+	select {
+	case <-c.timerDone:
+		c.setError(context.DeadlineExceeded)
+	case <-c.ctxDone:
+		c.setError(context.Canceled)
+	}
+}
 
-	return result
+func (c *fakeClockContext) setError(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.err = err
+	c.cancel()
 }
