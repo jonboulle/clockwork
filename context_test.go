@@ -15,9 +15,6 @@ func TestContextOps(t *testing.T) {
 
 	ctx = AddToContext(ctx, NewFakeClock())
 	assertIsType(t, NewFakeClock(), FromContext(ctx))
-
-	ctx = AddToContext(ctx, NewRealClock())
-	assertIsType(t, NewRealClock(), FromContext(ctx))
 }
 
 func assertIsType(t *testing.T, expectedType, object any) {
@@ -80,7 +77,7 @@ func TestWithDeadlineDone(t *testing.T) {
 
 			select {
 			case <-child.Done():
-				t.Fatalf("WithDeadline context finished early.")
+				t.Fatal("WithDeadline context finished early.")
 			default:
 			}
 
@@ -92,39 +89,11 @@ func TestWithDeadlineDone(t *testing.T) {
 					t.Errorf("WithDeadline context returned %v, want %v", got, tc.want)
 				}
 			case <-base.Done():
-				t.Errorf("WithDeadline context was never canceled.")
+				t.Error("WithDeadline context was never canceled.")
 			}
 		})
 	}
 }
-
-func TestWithDeadlineParentDeadlineDoesNotCancelChild(t *testing.T) {
-	t.Parallel()
-	base, cancelBase := context.WithTimeout(context.Background(), timeout)
-	defer cancelBase()
-
-	// Parent context hits deadline effectively immediately.
-	parent, cancelParent := context.WithTimeout(base, time.Nanosecond)
-	defer cancelParent()
-
-	clock := NewFakeClockAt(time.Unix(10, 0))
-	child, cancelChild := WithDeadline(parent, clock, time.Unix(20, 0))
-	defer cancelChild()
-
-	// TODO(https://github.com/jonboulle/clockwork/issues/67): The time.After()
-	// below makes the case for having a way to validate that no timers have
-	// fired, rather than waiting an arbitrary amount of time and hoping you've
-	// waiting long enough to cover any race conditions.
-	//
-	// An abandoned attempt to do this can be found in
-	// https://github.com/jonboulle/clockwork/pull/69.
-	select {
-	case <-time.After(50 * time.Millisecond): // Sleeping in tests, yuck.
-	case <-child.Done():
-		t.Errorf("WithDeadline context respected parenet deadline, returning %v, want parent deadline to be ignored.", child.Err())
-	}
-}
-
 func TestWithTimeoutDone(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -156,7 +125,7 @@ func TestWithTimeoutDone(t *testing.T) {
 			want: context.Canceled,
 		},
 		{
-			name:    "advancing past timeout cancels child",
+			name:    "advancing past deadline cancels child",
 			start:   time.Unix(10, 0),
 			timeout: 10 * time.Second,
 			action: func(_, _ context.CancelFunc, clock *FakeClock) {
@@ -179,7 +148,7 @@ func TestWithTimeoutDone(t *testing.T) {
 
 			select {
 			case <-child.Done():
-				t.Fatalf("WithTimeout context finished early.")
+				t.Fatal("WithTimeout context finished early.")
 			default:
 			}
 
@@ -191,35 +160,84 @@ func TestWithTimeoutDone(t *testing.T) {
 					t.Errorf("WithTimeout context returned %v, want %v", got, tc.want)
 				}
 			case <-background.Done():
-				t.Errorf("WithTimeout context was never canceled.")
+				t.Error("WithTimeout context was never canceled.")
 			}
 		})
 	}
 }
 
-func TestWithTimeoutParentTimeoutDoesNotCancelChild(t *testing.T) {
+func TestParentCancellationIsRespected(t *testing.T) {
 	t.Parallel()
-	base, cancelBase := context.WithTimeout(context.Background(), timeout)
-	defer cancelBase()
+	cases := []struct {
+		name string
 
-	// Parent context hits deadline effectively immediately.
-	parent, cancelParent := context.WithTimeout(base, time.Nanosecond)
-	defer cancelParent()
+		contextFunc func(context.Context, *FakeClock) (context.Context, context.CancelFunc)
 
-	clock := NewFakeClockAt(time.Unix(10, 0))
-	child, cancelChild := WithTimeout(parent, clock, 10*time.Second)
-	defer cancelChild()
+		requireContextDeadlineExceeded bool
+	}{
+		{
+			name: "WithDeadline in the future",
+			contextFunc: func(ctx context.Context, fc *FakeClock) (context.Context, context.CancelFunc) {
+				return WithDeadline(ctx, fc, time.Now().Add(time.Hour))
+			},
+			// The FakeClock does not hit its deadline, so the error must be context.DeadlineExceeded.
+			requireContextDeadlineExceeded: true,
+		},
+		{
+			name: "WithDeadline in the past",
+			contextFunc: func(ctx context.Context, fc *FakeClock) (context.Context, context.CancelFunc) {
+				return WithDeadline(ctx, fc, time.Now().Add(-time.Hour))
+			},
+		},
+		{
+			name: "WithTimeout in the future",
+			contextFunc: func(ctx context.Context, fc *FakeClock) (context.Context, context.CancelFunc) {
+				return WithTimeout(ctx, fc, time.Hour)
+			},
+			// The FakeClock does not hit its deadline, so the error must be context.DeadlineExceeded.
+			requireContextDeadlineExceeded: true,
+		},
+		{
+			name: "WithTimeout immediately",
+			contextFunc: func(ctx context.Context, fc *FakeClock) (context.Context, context.CancelFunc) {
+				return WithTimeout(ctx, fc, 0)
+			},
+		},
+		{
+			name: "WithTimeout in the past",
+			contextFunc: func(ctx context.Context, fc *FakeClock) (context.Context, context.CancelFunc) {
+				return WithTimeout(ctx, fc, -time.Hour)
+			},
+		},
+	}
 
-	// TODO(https://github.com/jonboulle/clockwork/issues/67): The time.After()
-	// below makes the case for having a way to validate that no timers have
-	// fired, rather than waiting an arbitrary amount of time and hoping you've
-	// waiting long enough to cover any race conditions.
-	//
-	// An abandoned attempt to do this can be found in
-	// https://github.com/jonboulle/clockwork/pull/69.
-	select {
-	case <-time.After(50 * time.Millisecond): // Sleeping in tests, yuck.
-	case <-child.Done():
-		t.Errorf("WithTimeout context respected parenet deadline, returning %v, want parent deadline to be ignored.", child.Err())
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			base, cancelBase := context.WithTimeout(context.Background(), timeout)
+			defer cancelBase()
+
+			// Parent context hits deadline effectively immediately.
+			parent, cancelParent := context.WithTimeout(base, time.Nanosecond)
+			defer cancelParent()
+
+			clock := NewFakeClockAt(time.Unix(10, 0))
+			child, cancelChild := tc.contextFunc(parent, clock)
+			defer cancelChild()
+
+			select {
+			case <-child.Done():
+			case <-base.Done():
+				t.Fatal("context did not respect parnet deadline")
+			}
+
+			if err := child.Err(); !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("errors.Is(Context.Err(), context.DeadlineExceeded) == falst, want true, error: %v", err)
+			}
+			if tc.requireContextDeadlineExceeded {
+				if err := child.Err(); errors.Is(err, ErrFakeClockDeadlineExceeded) {
+					t.Errorf("errors.Is(Context.Err(), ErrFakeClockDeadlineExceeded) == true, want false, error: %v", err)
+				}
+			}
+		})
 	}
 }

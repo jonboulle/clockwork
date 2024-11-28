@@ -2,7 +2,7 @@ package clockwork
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -34,6 +34,22 @@ func FromContext(ctx context.Context) Clock {
 	return NewRealClock()
 }
 
+// ErrFakeClockDeadlineExceeded is the error returned by [context.Context] when
+// the deadline passes on a context which uses a [FakeClock].
+//
+// It wraps a [context.DeadlineExceeded] error, i.e.:
+//
+//	// The following is true for any Context whose deadline has been exceeded,
+//	// including contexts made with clockwork.WithDeadline or clockwork.WithTimeout.
+//
+//	errors.Is(ctx.Err(), context.DeadlineExceeded)
+//
+//	// The following can only be true for contexts made
+//	// with clockwork.WithDeadline or clockwork.WithTimeout.
+//
+//	errors.Is(ctx.Err(), clockwork.ErrFakeClockDeadlineExceeded)
+var ErrFakeClockDeadlineExceeded error = fmt.Errorf("clockwork.FakeClock: %w", context.DeadlineExceeded)
+
 // WithDeadline returns a context with a deadline based on a [FakeClock].
 //
 // The returned context ignores parent cancelation if the parent was cancelled
@@ -43,16 +59,22 @@ func FromContext(ctx context.Context) Clock {
 // If the parent is cancelled with a [context.DeadlineExceeded] error, the only
 // way to then cancel the returned context is by calling the returned
 // context.CancelFunc.
-func WithDeadline(parent context.Context, clock *FakeClock, t time.Time) (context.Context, context.CancelFunc) {
-	return newFakeClockContext(parent, t, clock.newTimerAtTime(t, nil).Chan())
+func WithDeadline(parent context.Context, clock Clock, t time.Time) (context.Context, context.CancelFunc) {
+	if fc, ok := clock.(*FakeClock); ok {
+		return newFakeClockContext(parent, t, fc.newTimerAtTime(t, nil).Chan())
+	}
+	return context.WithDeadline(parent, t)
 }
 
 // WithTimeout returns a context with a timeout based on a [FakeClock].
 //
 // The returned context follows the same behaviors as [WithDeadline].
-func WithTimeout(parent context.Context, clock *FakeClock, d time.Duration) (context.Context, context.CancelFunc) {
-	t, deadline := clock.newTimer(d, nil)
-	return newFakeClockContext(parent, deadline, t.Chan())
+func WithTimeout(parent context.Context, clock Clock, d time.Duration) (context.Context, context.CancelFunc) {
+	if fc, ok := clock.(*FakeClock); ok {
+		t, deadline := fc.newTimer(d, nil)
+		return newFakeClockContext(parent, deadline, t.Chan())
+	}
+	return context.WithTimeout(parent, d)
 }
 
 // fakeClockContext implements context.Context, using a fake clock for its
@@ -90,7 +112,7 @@ func newFakeClockContext(parent context.Context, deadline time.Time, timer <-cha
 	}
 	ready := make(chan struct{}, 1)
 	go ctx.runCancel(ready)
-	<-ready // Cancellation goroutine is running.
+	<-ready // Wait until the cancellation goroutine is running.
 	return ctx, ctx.cancel
 }
 
@@ -127,35 +149,21 @@ func (c *fakeClockContext) runCancel(ready chan struct{}) {
 	// branches of our select statement below.
 	defer close(ready)
 
-	var ctxErr error
-	for ctxErr == nil {
+	for c.err == nil {
 		select {
 		case <-c.timerDone:
-			ctxErr = context.DeadlineExceeded
-
+			c.err = ErrFakeClockDeadlineExceeded
 		case <-c.cancelCalled:
-			ctxErr = context.Canceled
-
+			c.err = context.Canceled
 		case <-parentDone:
-			parentDone = nil // This case statement can only fire once.
+			c.err = c.parent.Err()
 
-			if err := c.parent.Err(); !errors.Is(err, context.DeadlineExceeded) {
-				// The parent context was canceled with some error other than deadline
-				// exceeded, so we respect it.
-				ctxErr = err
-			}
 		case ready <- struct{}{}:
 			// Signals the cancellation goroutine has begun, in an attempt to minimize
 			// race conditions related to goroutine startup time.
 			ready = nil // This case statement can only fire once.
 		}
 	}
-
-	c.setError(ctxErr)
-	return
-}
-
-func (c *fakeClockContext) setError(err error) {
-	c.err = err
 	close(c.ctxDone)
+	return
 }
