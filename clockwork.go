@@ -109,8 +109,8 @@ type expirer interface {
 	expire(now time.Time) (next *time.Duration)
 
 	// Get and set the expiration time.
-	expiry() time.Time
-	setExpiry(time.Time)
+	expiration() time.Time
+	setExpiration(time.Time)
 }
 
 // After mimics [time.After]; it waits for the given duration to elapse on the
@@ -153,17 +153,7 @@ func (fc *FakeClock) NewTicker(d time.Duration) Ticker {
 	if d <= 0 {
 		panic(errors.New("non-positive interval for NewTicker"))
 	}
-	var ft *fakeTicker
-	ft = &fakeTicker{
-		firer: newFirer(),
-		d:     d,
-		reset: func(d time.Duration) {
-			fc.l.Lock()
-			defer fc.l.Unlock()
-			fc.setExpirer(ft, d)
-		},
-		stop: func() { fc.stop(ft) },
-	}
+	ft := newFakeTicker(fc, d)
 	fc.l.Lock()
 	defer fc.l.Unlock()
 	fc.setExpirer(ft, d)
@@ -192,7 +182,7 @@ func (fc *FakeClock) newTimer(d time.Duration, afterfunc func()) (*fakeTimer, ti
 	fc.l.Lock()
 	defer fc.l.Unlock()
 	fc.setExpirer(ft, d)
-	return ft, ft.expiry()
+	return ft, ft.expiration()
 }
 
 // newTimerAtTime is like newTimer, but uses a time instead of a duration.
@@ -218,12 +208,12 @@ func (fc *FakeClock) Advance(d time.Duration) {
 	//
 	// We don't iterate because the callback of the waiter might register a new
 	// waiter, so the list of waiters might change as we execute this.
-	for len(fc.waiters) > 0 && !end.Before(fc.waiters[0].expiry()) {
+	for len(fc.waiters) > 0 && !end.Before(fc.waiters[0].expiration()) {
 		w := fc.waiters[0]
 		fc.waiters = fc.waiters[1:]
 
 		// Use the waiter's expiration as the current time for this expiration.
-		now := w.expiry()
+		now := w.expiration()
 		fc.time = now
 		if d := w.expire(now); d != nil {
 			// Set the new expiration if needed.
@@ -311,10 +301,10 @@ func (fc *FakeClock) setExpirer(e expirer, d time.Duration) {
 		return
 	}
 	// Add the expirer to the set of waiters and notify any blockers.
-	e.setExpiry(fc.time.Add(d))
+	e.setExpiration(fc.time.Add(d))
 	fc.waiters = append(fc.waiters, e)
 	slices.SortFunc(fc.waiters, func(a, b expirer) int {
-		return a.expiry().Compare(b.expiry())
+		return a.expiration().Compare(b.expiration())
 	})
 
 	// Notify blockers of our new waiter.
@@ -326,32 +316,4 @@ func (fc *FakeClock) setExpirer(e expirer, d time.Duration) {
 		}
 		return false
 	})
-}
-
-// firer is used by fakeTimer and fakeTicker used to help implement expirer.
-type firer struct {
-	// The channel associated with the firer, used to send expiration times.
-	c chan time.Time
-
-	// The time when the firer expires. Only meaningful if the firer is currently
-	// one of a fakeClock's waiters.
-	exp time.Time
-}
-
-func newFirer() firer {
-	return firer{c: make(chan time.Time, 1)}
-}
-
-func (f *firer) Chan() <-chan time.Time {
-	return f.c
-}
-
-// expiry implements expirer.
-func (f *firer) expiry() time.Time {
-	return f.exp
-}
-
-// setExpiry implements expirer.
-func (f *firer) setExpiry(t time.Time) {
-	f.exp = t
 }
