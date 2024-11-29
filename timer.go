@@ -22,7 +22,7 @@ type fakeTimer struct {
 	c chan time.Time
 
 	// The time when the firer expires. Only meaningful if the firer is currently
-	// one of a fakeClock's waiters.
+	// one of a FakeClock's waiters.
 	exp time.Time
 
 	// reset and stop provide the implementation of the respective exported

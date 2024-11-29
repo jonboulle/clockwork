@@ -22,8 +22,8 @@ type fakeTicker struct {
 	// The channel associated with the firer, used to send expiration times.
 	c chan time.Time
 
-	// The time when the firer expires. Only meaningful if the firer is currently
-	// one of a fakeClock's waiters.
+	// The time when the ticker expires. Only meaningful if the ticker is currently
+	// one of a FakeClock's waiters.
 	exp time.Time
 
 	// reset and stop provide the implementation of the respective exported
