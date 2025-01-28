@@ -317,3 +317,21 @@ func (fc *FakeClock) setExpirer(e expirer, d time.Duration) {
 		return false
 	})
 }
+
+// NextWakeup returns the time of the next expirer to wake up.
+//
+// If there are no waiters, it returns the zero time.
+//
+// This can be used with Advance to wake subsequent blockers no matter
+// what time they are blocked on.
+func (fc *FakeClock) NextWakeup() time.Time {
+	fc.l.RLock()
+	defer fc.l.RUnlock()
+	var end time.Time
+	for i, s := range fc.waiters {
+		if i == 0 || s.expiration().Before(end) {
+			end = s.expiration()
+		}
+	}
+	return end
+}

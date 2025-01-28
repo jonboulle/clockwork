@@ -209,3 +209,30 @@ func TestFakeClockRace(t *testing.T) {
 	go func() { fc.NewTimer(d) }()
 	go func() { fc.Sleep(d) }()
 }
+
+func TestNextWakeup(t *testing.T) {
+	t.Parallel()
+	zero := time.Time{}
+	fc := NewFakeClockAt(zero)
+	if got := fc.NextWakeup(); got != zero {
+		t.Errorf("fakeClock.nextWakeup() returned %v, want zero", got)
+	}
+
+	ch := fc.After(time.Minute)
+
+	if got := fc.NextWakeup(); got != zero.Add(time.Minute) {
+		t.Errorf("fakeClock.nextWakeup() returned %v, want 1 minute", got)
+	}
+
+	fc.Advance(fc.NextWakeup().Sub(fc.Now()))
+	<-ch
+
+	if got := fc.NextWakeup(); got != zero {
+		t.Errorf("fakeClock.nextWakeup() returned %v, want zero", got)
+	}
+
+	// Check now
+	if got := fc.Now(); got != zero.Add(time.Minute) {
+		t.Errorf("fakeClock.Now() returned %v, want zero+1 minute", got)
+	}
+}
