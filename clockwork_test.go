@@ -3,6 +3,8 @@ package clockwork
 import (
 	"context"
 	"errors"
+	"math/rand"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -208,4 +210,27 @@ func TestFakeClockRace(t *testing.T) {
 	go func() { fc.NewTicker(d) }()
 	go func() { fc.NewTimer(d) }()
 	go func() { fc.Sleep(d) }()
+}
+
+func TestSleepNotify(t *testing.T) {
+	var calls atomic.Int32
+	clock := NewFakeClock()
+	beforeCh := make(chan struct{})
+	afterCh := make(chan struct{})
+	go func() { // thread #1
+		clock.SleepNotify(time.Minute, beforeCh) // We want to wait for this before advancing the clock
+		calls.Add(1)
+		close(afterCh)
+	}()
+	go func() {                // thread #2
+		if rand.Intn(2) == 0 { // 50% chance of making another Sleep
+			clock.Sleep(time.Hour)
+		}
+	}()
+	<-beforeCh
+	clock.Advance(time.Minute)
+	<-afterCh
+	if calls.Load() != 1 {
+		t.Fatalf("SleepNotify() did not call the callback")
+	}
 }

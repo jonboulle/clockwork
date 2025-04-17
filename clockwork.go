@@ -121,7 +121,15 @@ func (fc *FakeClock) After(d time.Duration) <-chan time.Time {
 
 // Sleep blocks until the given duration has passed on the fakeClock.
 func (fc *FakeClock) Sleep(d time.Duration) {
-	<-fc.After(d)
+	fc.SleepNotify(d, make(chan struct{}))
+}
+
+// SleepNotify blocks until the given duration has passed on the fakeClock.
+// Notify "ch" once the waiters has been updated
+func (fc *FakeClock) SleepNotify(d time.Duration, ch chan struct{}) {
+	afterCh := fc.After(d)
+	close(ch)
+	<-afterCh
 }
 
 // Now returns the current time of the fakeClock
