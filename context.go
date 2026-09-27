@@ -125,8 +125,12 @@ func (c *fakeClockContext) Done() <-chan struct{} {
 }
 
 func (c *fakeClockContext) Err() error {
-	<-c.Done() // Don't return the error before it is ready.
-	return c.err
+	select {
+	case <-c.Done():
+		return c.err
+	default:
+		return nil
+	}
 }
 
 func (c *fakeClockContext) Value(key any) any {
