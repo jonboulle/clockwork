@@ -61,7 +61,7 @@ var ErrFakeClockDeadlineExceeded error = fmt.Errorf("clockwork.FakeClock: %w", c
 // context.CancelFunc.
 func WithDeadline(parent context.Context, clock Clock, t time.Time) (context.Context, context.CancelFunc) {
 	if fc, ok := clock.(*FakeClock); ok {
-		return newFakeClockContext(parent, t, fc.newTimerAtTime(t, nil).Chan())
+		return newFakeClockContext(parent, t, fc.newTimerAtTime(t, nil))
 	}
 	return context.WithDeadline(parent, t)
 }
@@ -72,7 +72,7 @@ func WithDeadline(parent context.Context, clock Clock, t time.Time) (context.Con
 func WithTimeout(parent context.Context, clock Clock, d time.Duration) (context.Context, context.CancelFunc) {
 	if fc, ok := clock.(*FakeClock); ok {
 		t, deadline := fc.newTimer(d, nil)
-		return newFakeClockContext(parent, deadline, t.Chan())
+		return newFakeClockContext(parent, deadline, t)
 	}
 	return context.WithTimeout(parent, d)
 }
@@ -87,7 +87,7 @@ type fakeClockContext struct {
 	deadline time.Time // The user-facing deadline based on the fake clock's time.
 
 	// Tracks timeout/deadline cancellation.
-	timerDone <-chan time.Time
+	timer Timer
 
 	// Tracks manual calls to the cancel function.
 	cancel       func() // Closes cancelCalled wrapped in a sync.Once.
@@ -98,12 +98,12 @@ type fakeClockContext struct {
 	err     error         // nil until ctxDone is ready to be closed.
 }
 
-func newFakeClockContext(parent context.Context, deadline time.Time, timer <-chan time.Time) (context.Context, context.CancelFunc) {
+func newFakeClockContext(parent context.Context, deadline time.Time, timer Timer) (context.Context, context.CancelFunc) {
 	cancelCalled := make(chan struct{})
 	ctx := &fakeClockContext{
 		parent:       parent,
 		deadline:     deadline,
-		timerDone:    timer,
+		timer:        timer,
 		cancelCalled: cancelCalled,
 		ctxDone:      make(chan struct{}),
 		cancel: sync.OnceFunc(func() {
@@ -151,7 +151,7 @@ func (c *fakeClockContext) runCancel(ready chan struct{}) {
 
 	for c.err == nil {
 		select {
-		case <-c.timerDone:
+		case <-c.timer.Chan():
 			c.err = ErrFakeClockDeadlineExceeded
 		case <-c.cancelCalled:
 			c.err = context.Canceled
@@ -164,6 +164,7 @@ func (c *fakeClockContext) runCancel(ready chan struct{}) {
 			ready = nil // This case statement can only fire once.
 		}
 	}
+	c.timer.Stop()
 	close(c.ctxDone)
 	return
 }
