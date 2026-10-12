@@ -41,8 +41,12 @@ func newFakeTicker(fc *FakeClock, d time.Duration) *fakeTicker {
 		c: make(chan time.Time, 1),
 		d: d,
 		reset: func(d time.Duration) {
+			if d <= 0 {
+				panic("non-positive interval for Ticker.Reset")
+			}
 			fc.l.Lock()
 			defer fc.l.Unlock()
+			fc.stopExpirer(ft)
 			ft.d = d
 			fc.setExpirer(ft, d)
 		},
