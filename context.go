@@ -59,6 +59,7 @@ var ErrFakeClockDeadlineExceeded error = fmt.Errorf("clockwork.FakeClock: %w", c
 // If the parent is cancelled with a [context.DeadlineExceeded] error, the only
 // way to then cancel the returned context is by calling the returned
 // context.CancelFunc.
+// The returned CancelFunc waits until the context's Done channel is closed.
 func WithDeadline(parent context.Context, clock Clock, t time.Time) (context.Context, context.CancelFunc) {
 	if fc, ok := clock.(*FakeClock); ok {
 		return newFakeClockContext(parent, t, fc.newTimerAtTime(t, nil).Chan())
@@ -113,7 +114,10 @@ func newFakeClockContext(parent context.Context, deadline time.Time, timer <-cha
 	ready := make(chan struct{}, 1)
 	go ctx.runCancel(ready)
 	<-ready // Wait until the cancellation goroutine is running.
-	return ctx, ctx.cancel
+	return ctx, func() {
+		ctx.cancel()
+		<-ctx.Done()
+	}
 }
 
 func (c *fakeClockContext) Deadline() (time.Time, bool) {
