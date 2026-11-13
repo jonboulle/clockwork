@@ -65,10 +65,12 @@ func (rc *realClock) AfterFunc(d time.Duration, f func()) Timer {
 // FakeClock provides an interface for a clock which can be manually advanced
 // through time.
 //
-// FakeClock maintains a list of "waiters," which consists of all callers
-// waiting on the underlying clock (i.e. Tickers and Timers including callers of
-// Sleep or After). Users can call BlockUntil to block until the clock has an
-// expected number of waiters.
+// FakeClock maintains registered timers and tickers as "waiters", including the
+// timers used by Sleep and After. A timer with a positive duration is registered
+// when it is created or reset, independently of whether its channel is read.
+// Stopping or expiring a timer removes its registration. Tickers remain
+// registered across ticks. BlockUntilContext can wait for at least a given
+// number of registered waiters.
 type FakeClock struct {
 	// l protects all attributes of the clock, including all attributes of all
 	// waiters and blockers.
@@ -223,7 +225,7 @@ func (fc *FakeClock) Advance(d time.Duration) {
 	fc.time = end
 }
 
-// BlockUntil blocks until the FakeClock has the given number of waiters.
+// BlockUntil blocks until the FakeClock has at least n registered waiters.
 //
 // Prefer BlockUntilContext in new code, which offers context cancellation to
 // prevent deadlock.
@@ -233,8 +235,12 @@ func (fc *FakeClock) BlockUntil(n int) {
 	fc.BlockUntilContext(context.TODO(), n)
 }
 
-// BlockUntilContext blocks until the fakeClock has the given number of waiters
-// or the context is cancelled.
+// BlockUntilContext blocks until the FakeClock has at least n registered waiters
+// or the context is cancelled. It returns immediately if the count is already
+// satisfied. See FakeClock for what counts as a waiter.
+//
+// The waiter count does not track channel readers or work performed after a timer
+// or ticker fires. Use separate synchronization to wait for that work to finish.
 func (fc *FakeClock) BlockUntilContext(ctx context.Context, n int) error {
 	b := fc.newBlocker(n)
 	if b == nil {
