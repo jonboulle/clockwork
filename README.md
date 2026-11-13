@@ -74,6 +74,52 @@ myFunc(clockwork.NewRealClock())
 
 See [example_test.go](example_test.go) for a full example.
 
+### Waiting for timers and tickers
+
+A FakeClock "waiter" is a registered timer or ticker, including the timers used
+by `Sleep` and `After`. Creating a timer with a positive duration or a ticker
+registers it immediately. Calling `Chan()` or receiving from the channel does not
+add a waiter. A timer's registration is removed when it fires or is stopped;
+resetting it with a positive duration registers it again. Tickers register their
+next expiration after each tick.
+
+`BlockUntilContext(ctx, n)` waits for **at least** `n` registrations. For example,
+the first call below returns immediately even though nothing has read the timer's
+channel:
+
+```go
+func TestTimerWaiters(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	c := clockwork.NewFakeClock()
+	timer := c.NewTimer(time.Hour)
+	defer timer.Stop()
+
+	if err := c.BlockUntilContext(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	timer.Stop()
+	timer.Reset(2 * time.Hour)
+	if err := c.BlockUntilContext(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	c.Advance(2 * time.Hour)
+	select {
+	case <-timer.Chan():
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
+```
+
+The count does not show whether a goroutine has received a timer event or
+finished processing it. Use a channel or `sync.WaitGroup`, as in the earlier
+example, to synchronize that work. Likewise, if timers are stopped and reset
+concurrently, the same count can be present both before and after the reset;
+waiting for that count does not establish that a particular reset has happened.
+
 
 # Credits
 
