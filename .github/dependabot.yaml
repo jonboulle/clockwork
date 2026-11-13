@@ -7,3 +7,9 @@ updates:
       - dependencies
     schedule:
       interval: daily
+    exclude-paths:
+      - .github/workflows/codeql.yaml
+    groups:
+      github-actions:
+        patterns:
+          - "*"

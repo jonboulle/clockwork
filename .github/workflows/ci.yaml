@@ -15,16 +15,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go: ['1.21', '1.22', '1.23']
+        go: ['1.21', '1.22', '1.23', '1.24', '1.25', '1.26', '1.27', 'oldstable', 'stable']
 
     steps:
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ matrix.go }}
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Run tests
         run: go test -v -race
