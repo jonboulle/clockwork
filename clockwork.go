@@ -43,11 +43,11 @@ func (rc *realClock) Now() time.Time {
 }
 
 func (rc *realClock) Since(t time.Time) time.Duration {
-	return rc.Now().Sub(t)
+	return time.Since(t)
 }
 
 func (rc *realClock) Until(t time.Time) time.Duration {
-	return t.Sub(rc.Now())
+	return time.Until(t)
 }
 
 func (rc *realClock) NewTicker(d time.Duration) Ticker {
