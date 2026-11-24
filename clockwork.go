@@ -78,6 +78,12 @@ type FakeClock struct {
 	waiters  []expirer
 	blockers []*blocker
 	time     time.Time
+
+	// registered counts the waiters registered since the clock was created.
+	registered int
+	// registeredBlockers are callers of AdvanceAndBlockUntilRearmed. Each one is
+	// released when registered reaches its count.
+	registeredBlockers []*blocker
 }
 
 // NewFakeClock returns a FakeClock implementation which can be
@@ -204,6 +210,52 @@ func (fc *FakeClock) newTimerAtTime(t time.Time, afterfunc func()) *fakeTimer {
 func (fc *FakeClock) Advance(d time.Duration) {
 	fc.l.Lock()
 	defer fc.l.Unlock()
+	fc.advance(d)
+}
+
+// AdvanceAndBlockUntilRearmed advances the clock by d, then blocks until a new
+// waiter has been registered for each timer the advance expired, or until the
+// context is done.
+//
+// It is meant for code that waits on the clock in a loop: when it returns, each
+// loop woken by the advance has finished its iteration and waits on the clock
+// again. Tickers are not counted, since they remain registered across ticks. A
+// timer that expires and is never rearmed, such as the timer of a stopped loop,
+// makes it block until the context is done.
+func (fc *FakeClock) AdvanceAndBlockUntilRearmed(ctx context.Context, d time.Duration) error {
+	b := fc.advanceAndExpectRearms(d)
+	if b == nil {
+		return nil
+	}
+
+	select {
+	case <-b.ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (fc *FakeClock) advanceAndExpectRearms(d time.Duration) *blocker {
+	fc.l.Lock()
+	defer fc.l.Unlock()
+	expired := fc.advance(d)
+	if expired == 0 {
+		return nil
+	}
+	b := &blocker{
+		count: fc.registered + expired,
+		ch:    make(chan struct{}),
+	}
+	fc.registeredBlockers = append(fc.registeredBlockers, b)
+	return b
+}
+
+// advance advances the clock by d and returns the number of timers it expired.
+//
+// The caller must hold fc.l.
+func (fc *FakeClock) advance(d time.Duration) int {
+	expired := 0
 	end := fc.time.Add(d)
 	// Expire the earliest waiter until the earliest waiter's expiration is after
 	// end.
@@ -220,9 +272,12 @@ func (fc *FakeClock) Advance(d time.Duration) {
 		if d := w.expire(now); d != nil {
 			// Set the new expiration if needed.
 			fc.setExpirer(w, *d)
+		} else {
+			expired++
 		}
 	}
 	fc.time = end
+	return expired
 }
 
 // BlockUntil blocks until the FakeClock has at least n registered waiters.
@@ -317,6 +372,15 @@ func (fc *FakeClock) setExpirer(e expirer, d time.Duration) {
 	count := len(fc.waiters)
 	fc.blockers = slices.DeleteFunc(fc.blockers, func(b *blocker) bool {
 		if b.count <= count {
+			close(b.ch)
+			return true
+		}
+		return false
+	})
+
+	fc.registered++
+	fc.registeredBlockers = slices.DeleteFunc(fc.registeredBlockers, func(b *blocker) bool {
+		if b.count <= fc.registered {
 			close(b.ch)
 			return true
 		}
