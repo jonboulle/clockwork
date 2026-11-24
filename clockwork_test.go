@@ -177,6 +177,62 @@ func TestBlockUntilContext(t *testing.T) {
 	}
 }
 
+func TestAdvanceAndBlockUntilRearmedNoExpiration(t *testing.T) {
+	t.Parallel()
+	fc := &FakeClock{}
+	fc.After(2 * time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	if err := fc.AdvanceAndBlockUntilRearmed(ctx, time.Second); err != nil {
+		t.Errorf("AdvanceAndBlockUntilRearmed returned %v, want nil.", err)
+	}
+}
+
+func TestAdvanceAndBlockUntilRearmedPastExpiration(t *testing.T) {
+	t.Parallel()
+	fc := &FakeClock{}
+	timer := fc.After(time.Second)
+	go func() {
+		<-timer
+		fc.After(time.Second)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	if err := fc.AdvanceAndBlockUntilRearmed(ctx, 2*time.Second); err != nil {
+		t.Errorf("AdvanceAndBlockUntilRearmed returned %v, want nil.", err)
+	}
+}
+
+func TestAdvanceAndBlockUntilRearmedTicker(t *testing.T) {
+	t.Parallel()
+	fc := &FakeClock{}
+	fc.NewTicker(time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	if err := fc.AdvanceAndBlockUntilRearmed(ctx, time.Second); err != nil {
+		t.Errorf("AdvanceAndBlockUntilRearmed returned %v, want nil.", err)
+	}
+}
+
+func TestAdvanceAndBlockUntilRearmedAbandonedTimer(t *testing.T) {
+	t.Parallel()
+	fc := &FakeClock{}
+	fc.After(time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	if err := fc.AdvanceAndBlockUntilRearmed(ctx, time.Second); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("AdvanceAndBlockUntilRearmed returned %v, want context.DeadlineExceeded.", err)
+	}
+}
+
 func TestAfterDeliveryInOrder(t *testing.T) {
 	t.Parallel()
 	fc := &FakeClock{}
